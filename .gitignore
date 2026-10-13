@@ -1,0 +1,7 @@
+node_modules/
+.env.db
+
+# Keep Markdown notes and their archive local.
+*.md
+*.MD
+/md.zip

@@ -9,7 +9,9 @@ Proje TypeScript ile, testleri ilk günden yazılarak geliştiriliyor.
 - `server/`: Node.js + Express API (TypeScript).
 - `server/src/domain/`: Saf iş kuralları ve tipler; kart, pano, olaylar ve `moveCard`.
 - `server/src/http/`: API yanıt tipi, hata sınıfı ve gelen veriyi doğrulama.
-- `server/src/store/`: Veri deposu (şimdilik bellekte).
+- `server/src/store/`: Ortak asenkron `CardStore` arayüzü; bellek ve PostgreSQL depoları.
+- `server/src/db/`: Bağlantı havuzu, bağlantı kontrolü ve migration çalıştırıcısı.
+- `server/migrations/`: Veritabanı şemasını kuran SQL dosyaları.
 - `server/playground/`: TypeScript alıştırmaları.
 - `compose.yaml`: PostgreSQL 18 (Docker), `127.0.0.1:5433`.
 
@@ -23,6 +25,8 @@ npm install
 npm run dev
 ```
 
+`.env` yoksa uygulama varsayılan olarak bellek deposunu ve `4000` portunu kullanır. Bellekteki kartlar sunucu kapanınca kaybolur. PostgreSQL ile kalıcılık için aşağıdaki kurulumu tamamla.
+
 Tip kontrolü ve testler de `server/` klasöründe çalıştırılır:
 
 ```bash
@@ -34,7 +38,7 @@ Node tipleri kontrol etmez; tip kontrolü yalnız `npm run typecheck` (`tsc`) il
 
 ## Veritabanı
 
-PostgreSQL 18 Docker'da çalışır. Uygulama henüz bağlanmıyor (2. gün).
+PostgreSQL 18 Docker'da çalışır. Uygulama `pg` bağlantı havuzuyla veritabanına bağlanır; kullanılacak depo `STORE` değişkeniyle seçilir.
 
 Projenin kök klasöründe:
 
@@ -46,10 +50,49 @@ cp .env.db.example .env.db
 
 ```bash
 docker compose up -d
-docker compose exec db psql -U live_board -d live_board
 ```
 
 Veri `db-data` volume'unda, konteynerin `/var/lib/postgresql` klasöründe durur (PostgreSQL 18 imajında yol bu; 17 ve öncesinde `/var/lib/postgresql/data`).
+
+Ardından sunucunun ortam dosyasını oluştur:
+
+```bash
+cd server
+cp .env.example .env
+```
+
+`server/.env` içindeki `DATABASE_URL` değerinde `PAROLA` yerine `.env.db` dosyasındaki parolayı yaz. Örnek dosyada `STORE=postgres` ve `PORT=4000` hazırdır; `.env` dosyaları git'e girmez.
+
+`server/` klasöründe bağlantıyı kontrol et, şemayı kur ve sunucuyu başlat:
+
+```bash
+npm run db:ping
+npm run db:migrate
+npm run dev
+```
+
+Migration, `boards` ve `cards` tablolarını ve başlangıç panosunu oluşturur. Uygulanan SQL dosyaları `schema_migrations` tablosunda tutulur; aynı migration yeniden çalıştırıldığında atlanır.
+
+Veritabanını terminalden incelemek için projenin kökünde `docker compose exec db psql -U live_board -d live_board` çalıştırılabilir.
+
+## Testler
+
+`server/` klasöründe:
+
+```bash
+npm run typecheck
+npm test
+npm run test:db
+```
+
+- `npm test`: `moveCard` iş kuralları ve bellek deposuyla HTTP uçları; veritabanı gerektirmez.
+- `npm run test:db`: PostgreSQL deposunda kart oluşturma, taşımanın kalıcılığı, bulunamayan kart ve SQL `CHECK` kısıtı. PostgreSQL'in açık, `.env` dosyasının ayarlı ve migration'ın uygulanmış olması gerekir. Testler kendi panosunu oluşturup sonunda siler.
+
+## Depolar
+
+`STORE=memory` geliştirme için geçici bellek deposunu, `STORE=postgres` kalıcı PostgreSQL deposunu seçer. Her ikisi de aynı `Promise` döndüren `CardStore` arayüzünü uygular; HTTP katmanı depo çağrılarını `await` ile bekler.
+
+PostgreSQL deposu parametreli sorgular kullanır. Kart taşıma sırasında bir bağlantıda transaction açılır, panonun mevcut kart satırları `FOR UPDATE` ile kilitlenir, `moveCard` sonucuna göre sıralar yazılır ve işlem `COMMIT` edilir; hata durumunda `ROLLBACK` yapılır. Bağlantı `finally` içinde havuza bırakılır.
 
 ## Uçlar
 
@@ -74,15 +117,14 @@ Yanıtlar `{ success: true, data }` veya `{ success: false, error: { code, messa
 
 ## Bilinen Sınırlamalar
 
-- Veri bellekte; sunucu yeniden başlayınca kartlar silinir. PostgreSQL açık ama uygulama henüz ona bağlı değil.
-- Tek pano var (id `1`).
+- `STORE=memory` kullanıldığında sunucu yeniden başlayınca kartlar silinir; kalıcılık için `STORE=postgres` gerekir.
+- Başlangıç panosu var (id `1`); pano oluşturma ucu yok.
 - Kart silme ve düzenleme yok.
 - Gerçek zamanlı güncelleme yok.
-- Yalnız `moveCard`'ın testi var; HTTP katmanının testi yok.
 
 ## Sonraki Adımlar (taslak)
 
-- PostgreSQL ile kalıcı depo (`pg`), aynı `CardStore` arayüzüyle; migration; `zod` ile doğrulama; HTTP testleri.
+- Girdi doğrulamasını `zod` ile şemalara taşıma (şu an elle doğrulanıyor).
 - React + TypeScript arayüz.
 - WebSocket ile canlı güncelleme.
 - Redis: pub/sub ile birden fazla sunucu, önbellek.

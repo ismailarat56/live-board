@@ -1,5 +1,5 @@
+import { CARD_STATUSES, type Card } from '@live-board/shared';
 import type { Board } from '../domain/board.ts';
-import { CARD_STATUSES, type Card } from '../domain/card.ts';
 import { moveCard } from '../domain/move-card.ts';
 import type { CardStore } from './card-store.ts';
 

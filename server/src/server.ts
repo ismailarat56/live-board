@@ -1,7 +1,7 @@
+import { assertNever } from "@live-board/shared";
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
 import { createPool } from "./db/pool.ts";
-import { assertNever } from "./domain/assert-never.ts";
 import type { CardStore } from "./store/card-store.ts";
 import { createMemoryStore } from "./store/memory-store.ts";
 import { createPgStore } from "./store/pg-store.ts";

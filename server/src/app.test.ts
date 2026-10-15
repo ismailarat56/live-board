@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { test, type TestContext } from "node:test";
+import type { ApiResponse, Card } from "@live-board/shared";
 import { createApp } from "./app.ts";
-import type { Card } from "./domain/card.ts";
-import type { ApiResponse } from "./http/api-response.ts";
 import { createMemoryStore } from "./store/memory-store.ts";
 
 interface TestResponse<T> {
@@ -118,7 +117,13 @@ test("hatalı istekler doğru durum ve hata koduyla döner", async (t) => {
     { method: "GET", path: "/api/boards/99/cards", status: 404, code: "BOARD_NOT_FOUND" },
     { method: "GET", path: "/api/boards/abc/cards", status: 400, code: "INVALID_ID" },
     { method: "POST", path: "/api/boards/1/cards", body: { title: "" }, status: 422, code: "INVALID_TITLE" },
+    { method: "POST", path: "/api/boards/1/cards", body: { title: "   " }, status: 422, code: "INVALID_TITLE" },
+    { method: "POST", path: "/api/boards/1/cards", body: { title: "x".repeat(201) }, status: 422, code: "INVALID_TITLE" },
+    { method: "POST", path: "/api/boards/1/cards", body: { title: "Logo", description: 5 }, status: 422, code: "INVALID_DESCRIPTION" },
     { method: "POST", path: "/api/boards/1/cards", body: { title: "Logo", status: "blocked" }, status: 422, code: "INVALID_STATUS" },
+    { method: "POST", path: "/api/boards/1/cards", body: [], status: 400, code: "INVALID_BODY" },
+    { method: "PATCH", path: "/api/cards/1/move", body: { status: "done", position: 1.5 }, status: 422, code: "INVALID_POSITION" },
+    { method: "PATCH", path: "/api/cards/1/move", body: { status: "later", position: 0 }, status: 422, code: "INVALID_STATUS" },
     { method: "PATCH", path: "/api/cards/42/move", body: { status: "done", position: 0 }, status: 404, code: "CARD_NOT_FOUND" },
     { method: "GET", path: "/api/nowhere", status: 404, code: "NOT_FOUND" },
   ];

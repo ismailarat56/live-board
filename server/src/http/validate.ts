@@ -1,20 +1,39 @@
 import {
-  isCardStatus,
+  MoveCardSchema,
+  NewCardSchema,
   type MoveCardInput,
   type NewCardInput,
-} from "../domain/card.ts";
+} from "@live-board/shared";
+import type { z } from "zod";
 import { AppError } from "./app-error.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+interface FieldError {
+  code: string;
+  message: string;
 }
 
-function requireRecord(body: unknown): Record<string, unknown> {
-  if (!isRecord(body)) {
+const FIELD_ERRORS: Record<string, FieldError> = {
+  title: { code: "INVALID_TITLE", message: "Başlık 1-200 karakter olmalı." },
+  description: { code: "INVALID_DESCRIPTION", message: "Açıklama metin olmalı." },
+  status: { code: "INVALID_STATUS", message: "Durum todo, doing veya done olmalı." },
+  position: { code: "INVALID_POSITION", message: "Pozisyon bir tam sayı olmalı." },
+};
+
+function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
+  const result = schema.safeParse(body);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  const field = result.error.issues[0]?.path[0];
+  const fieldError = typeof field === "string" ? FIELD_ERRORS[field] : undefined;
+
+  if (fieldError === undefined) {
     throw new AppError(400, "INVALID_BODY", "Gövde bir JSON nesnesi olmalı.");
   }
 
-  return body;
+  throw new AppError(422, fieldError.code, fieldError.message);
 }
 
 export function parseId(raw: string, name: string): number {
@@ -28,45 +47,9 @@ export function parseId(raw: string, name: string): number {
 }
 
 export function parseNewCard(body: unknown): NewCardInput {
-  const { title, description, status } = requireRecord(body);
-
-  if (
-    typeof title !== "string" ||
-    title.trim().length === 0 ||
-    title.length > 200
-  ) {
-    throw new AppError(422, "INVALID_TITLE", "Başlık 1-200 karakter olmalı.");
-  }
-
-  if (
-    description !== undefined &&
-    description !== null &&
-    typeof description !== "string"
-  ) {
-    throw new AppError(422, "INVALID_DESCRIPTION", "Açıklama metin olmalı.");
-  }
-
-  if (status !== undefined && !isCardStatus(status)) {
-    throw new AppError(422, "INVALID_STATUS", "Durum todo, doing veya done olmalı.");
-  }
-
-  return {
-    title: title.trim(),
-    description: description ?? null,
-    status: status ?? "todo",
-  };
+  return parseBody(NewCardSchema, body);
 }
 
 export function parseMoveCard(body: unknown): MoveCardInput {
-  const { status, position } = requireRecord(body);
-
-  if (!isCardStatus(status)) {
-    throw new AppError(422, "INVALID_STATUS", "Durum todo, doing veya done olmalı.");
-  }
-
-  if (typeof position !== "number" || !Number.isInteger(position)) {
-    throw new AppError(422, "INVALID_POSITION", "Pozisyon bir tam sayı olmalı.");
-  }
-
-  return { status, position };
+  return parseBody(MoveCardSchema, body);
 }

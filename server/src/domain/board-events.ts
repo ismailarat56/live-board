@@ -1,5 +1,9 @@
-import { statusLabel, type Card, type CardStatus } from "./card.ts";
-import { assertNever } from "./assert-never.ts";
+import {
+  assertNever,
+  statusLabel,
+  type Card,
+  type CardStatus,
+} from "@live-board/shared";
 
 export type BoardEvent =
   | { type: "card_created"; card: Card }

@@ -1,5 +1,10 @@
-import type { Card, NewCardInput } from "../src/domain/card.ts";
-import { fail, ok, type ApiResponse } from "../src/http/api-response.ts";
+import {
+  fail,
+  ok,
+  type ApiResponse,
+  type Card,
+  type NewCardInput,
+} from "@live-board/shared";
 
 function firstOrNull<T>(items: readonly T[]): T | null {
   return items[0] ?? null;

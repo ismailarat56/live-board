@@ -1,5 +1,5 @@
+import { fail, ok } from "@live-board/shared";
 import express, { type ErrorRequestHandler, type Express } from "express";
-import { fail, ok } from "./http/api-response.ts";
 import { AppError } from "./http/app-error.ts";
 import { parseId, parseMoveCard, parseNewCard } from "./http/validate.ts";
 import type { CardStore } from "./store/card-store.ts";

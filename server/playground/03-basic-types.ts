@@ -1,4 +1,4 @@
-import type { Card, CardStatus } from "../src/domain/card.ts";
+import type { Card, CardStatus } from "@live-board/shared";
 
 const title: string = "Testleri yaz";
 const position: number = 0;

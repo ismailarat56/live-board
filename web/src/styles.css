@@ -1,0 +1,142 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1f2328;
+  background: #f4f5f7;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0 0 16px;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.column {
+  background: #ebecf0;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.column h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.count {
+  color: #57606a;
+  font-weight: normal;
+}
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.card p {
+  margin: 6px 0 0;
+  color: #57606a;
+  font-size: 0.875rem;
+}
+
+.empty {
+  color: #57606a;
+  font-size: 0.875rem;
+}
+
+@media (max-width: 720px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
+
+.new-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.new-card input,
+.new-card textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #c9ccd1;
+  border-radius: 6px;
+}
+
+.new-card textarea {
+  resize: vertical;
+}
+
+button {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid #c9ccd1;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.form-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #cf222e;
+}
+
+@media (max-width: 720px) {
+  .new-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+.moves {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.moves button {
+  padding: 2px 8px;
+  line-height: 1.2;
+}

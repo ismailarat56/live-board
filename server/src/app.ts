@@ -2,6 +2,7 @@ import { fail, ok } from "@live-board/shared";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { AppError } from "./http/app-error.ts";
 import { parseId, parseMoveCard, parseNewCard } from "./http/validate.ts";
+import { noopHub, type BoardHub } from "./realtime/hub.ts";
 import type { CardStore } from "./store/card-store.ts";
 
 const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
@@ -19,7 +20,7 @@ const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
   response.status(500).json(fail("INTERNAL_ERROR", "Beklenmeyen bir hata oluştu."));
 };
 
-export function createApp(store: CardStore): Express {
+export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
   const app = express();
 
   app.use(express.json({ limit: "20kb" }));
@@ -51,6 +52,8 @@ export function createApp(store: CardStore): Express {
 
     const card = await store.createCard(boardId, parseNewCard(request.body));
 
+    hub.publish(boardId, { type: "card_created", card });
+
     response.status(201).json(ok(card));
   });
 
@@ -60,6 +63,17 @@ export function createApp(store: CardStore): Express {
 
     if (cards === null) {
       throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+    }
+
+    const moved = cards.find((card) => card.id === cardId);
+
+    if (moved !== undefined) {
+      hub.publish(moved.boardId, {
+        type: "card_moved",
+        cardId,
+        toStatus: moved.status,
+        toPosition: moved.position,
+      });
     }
 
     response.json(ok(cards));

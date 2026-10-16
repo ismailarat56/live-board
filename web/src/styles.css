@@ -140,3 +140,27 @@ button:disabled {
   padding: 2px 8px;
   line-height: 1.2;
 }
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+}
+
+.connection::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.connection-open::before {
+  background: #16a34a;
+}
+
+.connection-closed::before {
+  background: #dc2626;
+}

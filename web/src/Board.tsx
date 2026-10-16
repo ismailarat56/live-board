@@ -5,16 +5,31 @@ import { boardReducer, cardsInColumn, initialBoardState } from "./board-state.ts
 import { Column } from "./Column.tsx";
 import { moveTarget, type Direction } from "./move-target.ts";
 import { NewCardForm } from "./NewCardForm.tsx";
+import { useBoardSocket, type SocketStatus } from "./use-board-socket.ts";
 
 interface BoardProps {
   boardId: number;
 }
+
+const STATUS_TEXT: Record<SocketStatus, string> = {
+  connecting: "Bağlanıyor...",
+  open: "Canlı",
+  closed: "Bağlantı kesildi",
+};
 
 export function Board({ boardId }: BoardProps) {
   const [state, dispatch] = useReducer(boardReducer, initialBoardState);
   const [attempt, setAttempt] = useState(0);
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [connection, setConnection] = useState(0);
+
+  const socketStatus = useBoardSocket({
+    boardId,
+    connection,
+    onWelcome: () => setAttempt((value) => value + 1),
+    onEvent: (event) => dispatch({ type: "eventReceived", event }),
+  });
 
   useEffect(() => {
     let ignore = false;
@@ -60,9 +75,25 @@ export function Board({ boardId }: BoardProps) {
     }
   }
 
+  const badge = (
+    <p className={`connection connection-${socketStatus}`}>
+      {STATUS_TEXT[socketStatus]}
+      {socketStatus === "closed" && (
+        <button type="button" onClick={() => setConnection((value) => value + 1)}>
+          Yeniden bağlan
+        </button>
+      )}
+    </p>
+  );
+
   switch (state.status) {
     case "loading":
-      return <p>Kartlar yükleniyor...</p>;
+      return (
+        <>
+          {badge}
+          <p>Kartlar yükleniyor...</p>
+        </>
+      );
     case "error":
       return (
         <div role="alert">
@@ -75,6 +106,7 @@ export function Board({ boardId }: BoardProps) {
     case "ready":
       return (
         <>
+          {badge}
           <NewCardForm
             boardId={boardId}
             onCreated={(card) => dispatch({ type: "cardCreated", card })}

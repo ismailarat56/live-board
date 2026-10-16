@@ -1,4 +1,10 @@
-import { assertNever, type Card, type CardStatus } from "@live-board/shared";
+import {
+  applyBoardEvent,
+  assertNever,
+  type BoardEvent,
+  type Card,
+  type CardStatus,
+} from "@live-board/shared";
 
 export type BoardState =
   | { status: "loading" }
@@ -10,7 +16,8 @@ export type BoardAction =
   | { type: "loaded"; cards: Card[] }
   | { type: "failed"; message: string }
   | { type: "cardCreated"; card: Card }
-  | { type: "cardsMoved"; cards: Card[] };
+  | { type: "cardsMoved"; cards: Card[] }
+  | { type: "eventReceived"; event: BoardEvent };
 
 export const initialBoardState: BoardState = { status: "loading" };
 
@@ -28,7 +35,16 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
         return state;
       }
 
-      return { status: "ready", cards: [...state.cards, action.card] };
+      return {
+        status: "ready",
+        cards: applyBoardEvent(state.cards, { type: "card_created", card: action.card }),
+      };
+    case "eventReceived":
+      if (state.status !== "ready") {
+        return state;
+      }
+
+      return { status: "ready", cards: applyBoardEvent(state.cards, action.event) };
     default:
       return assertNever(action);
   }

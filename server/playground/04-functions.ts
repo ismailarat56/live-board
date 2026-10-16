@@ -1,5 +1,9 @@
-import { isCardStatus, statusLabel } from '@live-board/shared';
-import { describeEvent, type BoardEvent } from '../src/domain/board-events.ts';
+import {
+  describeEvent,
+  isCardStatus,
+  statusLabel,
+  type BoardEvent,
+} from "@live-board/shared";
 
 function formatPosition(value: number | string): string {
 	if (typeof value === 'number') {

@@ -1,8 +1,7 @@
-import { CardStatusSchema, type Card } from "@live-board/shared";
+import { CardStatusSchema, moveCard, type Card } from "@live-board/shared";
 import type { Pool } from "pg";
 import { z } from "zod";
 import type { Board } from "../domain/board.ts";
-import { moveCard } from "../domain/move-card.ts";
 import type { CardStore } from "./card-store.ts";
 
 const CARD_COLUMNS =

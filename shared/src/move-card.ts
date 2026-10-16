@@ -1,4 +1,4 @@
-import type { Card, CardStatus, MoveCardInput } from "@live-board/shared";
+import type { Card, CardStatus, MoveCardInput } from "./card.ts";
 
 function byPosition(a: Card, b: Card): number {
   return a.position - b.position;

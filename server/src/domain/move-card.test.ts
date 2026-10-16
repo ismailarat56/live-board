@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Card, CardStatus } from "@live-board/shared";
-import { moveCard } from "./move-card.ts";
+import { moveCard, type Card, type CardStatus } from "@live-board/shared";
 
 function makeCard(id: number, status: CardStatus, position: number): Card {
   return {

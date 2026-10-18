@@ -17,9 +17,19 @@ export type BoardAction =
   | { type: "failed"; message: string }
   | { type: "cardCreated"; card: Card }
   | { type: "cardsMoved"; cards: Card[] }
+  | { type: "cardUpdated"; card: Card }
+  | { type: "cardDeleted"; cardId: number }
   | { type: "eventReceived"; event: BoardEvent };
 
 export const initialBoardState: BoardState = { status: "loading" };
+
+function applyWhenReady(state: BoardState, event: BoardEvent): BoardState {
+  if (state.status !== "ready") {
+    return state;
+  }
+
+  return { status: "ready", cards: applyBoardEvent(state.cards, event) };
+}
 
 export function boardReducer(state: BoardState, action: BoardAction): BoardState {
   switch (action.type) {
@@ -31,20 +41,18 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
     case "failed":
       return { status: "error", message: action.message };
     case "cardCreated":
-      if (state.status !== "ready") {
-        return state;
-      }
-
-      return {
-        status: "ready",
-        cards: applyBoardEvent(state.cards, { type: "card_created", card: action.card }),
-      };
+      return applyWhenReady(state, { type: "card_created", card: action.card });
+    case "cardUpdated":
+      return applyWhenReady(state, {
+        type: "card_updated",
+        cardId: action.card.id,
+        title: action.card.title,
+        description: action.card.description,
+      });
+    case "cardDeleted":
+      return applyWhenReady(state, { type: "card_deleted", cardId: action.cardId });
     case "eventReceived":
-      if (state.status !== "ready") {
-        return state;
-      }
-
-      return { status: "ready", cards: applyBoardEvent(state.cards, action.event) };
+      return applyWhenReady(state, action.event);
     default:
       return assertNever(action);
   }

@@ -1,32 +1,36 @@
 import { assertNever, CARD_STATUSES, type Card } from "@live-board/shared";
 import { useEffect, useReducer, useState } from "react";
-import { errorMessage, listCards, moveCard } from "./api.ts";
+import { deleteCard, errorMessage, listCards, moveCard } from "./api.ts";
 import { boardReducer, cardsInColumn, initialBoardState } from "./board-state.ts";
 import { Column } from "./Column.tsx";
 import { moveTarget, type Direction } from "./move-target.ts";
 import { NewCardForm } from "./NewCardForm.tsx";
-import { useBoardSocket, type SocketStatus } from "./use-board-socket.ts";
+import { useBoardSocket, type SocketState } from "./use-board-socket.ts";
 
 interface BoardProps {
   boardId: number;
 }
 
-const STATUS_TEXT: Record<SocketStatus, string> = {
-  connecting: "Bağlanıyor...",
-  open: "Canlı",
-  closed: "Bağlantı kesildi",
-};
+function socketText(state: SocketState): string {
+  switch (state.status) {
+    case "connecting":
+      return "Bağlanıyor...";
+    case "open":
+      return "Canlı";
+    case "waiting":
+      return `Bağlantı koptu, ${Math.ceil(state.delayMs / 1000)} sn içinde yeniden denenecek (${state.attempt}. deneme)`;
+    default:
+      return assertNever(state);
+  }
+}
 
 export function Board({ boardId }: BoardProps) {
   const [state, dispatch] = useReducer(boardReducer, initialBoardState);
   const [attempt, setAttempt] = useState(0);
-  const [moving, setMoving] = useState(false);
-  const [moveError, setMoveError] = useState<string | null>(null);
-  const [connection, setConnection] = useState(0);
-
-  const socketStatus = useBoardSocket({
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const socket = useBoardSocket({
     boardId,
-    connection,
     onWelcome: () => setAttempt((value) => value + 1),
     onEvent: (event) => dispatch({ type: "eventReceived", event }),
   });
@@ -63,24 +67,38 @@ export function Board({ boardId }: BoardProps) {
       return;
     }
 
-    setMoving(true);
-    setMoveError(null);
+    setBusy(true);
+    setActionError(null);
 
     try {
       dispatch({ type: "cardsMoved", cards: await moveCard(card.id, target) });
     } catch (error) {
-      setMoveError(errorMessage(error));
+      setActionError(errorMessage(error));
     } finally {
-      setMoving(false);
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(card: Card) {
+    setBusy(true);
+    setActionError(null);
+
+    try {
+      await deleteCard(card.id);
+      dispatch({ type: "cardDeleted", cardId: card.id });
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setBusy(false);
     }
   }
 
   const badge = (
-    <p className={`connection connection-${socketStatus}`}>
-      {STATUS_TEXT[socketStatus]}
-      {socketStatus === "closed" && (
-        <button type="button" onClick={() => setConnection((value) => value + 1)}>
-          Yeniden bağlan
+    <p className={`connection connection-${socket.state.status}`} role="status">
+      {socketText(socket.state)}
+      {socket.state.status === "waiting" && (
+        <button type="button" onClick={socket.reconnectNow}>
+          Şimdi dene
         </button>
       )}
     </p>
@@ -111,9 +129,9 @@ export function Board({ boardId }: BoardProps) {
             boardId={boardId}
             onCreated={(card) => dispatch({ type: "cardCreated", card })}
           />
-          {moveError && (
+          {actionError && (
             <p className="form-error" role="alert">
-              {moveError}
+              {actionError}
             </p>
           )}
           <div className="board">
@@ -122,11 +140,13 @@ export function Board({ boardId }: BoardProps) {
                 key={status}
                 status={status}
                 cards={cardsInColumn(state.cards, status)}
-                busy={moving}
+                busy={busy}
                 canMove={(card, direction) =>
                   moveTarget(state.cards, card, direction) !== null
                 }
                 onMove={(card, direction) => handleMove(state.cards, card, direction)}
+                onSaved={(card) => dispatch({ type: "cardUpdated", card })}
+                onDelete={handleDelete}
               />
             ))}
           </div>

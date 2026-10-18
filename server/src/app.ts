@@ -1,7 +1,12 @@
 import { fail, ok } from "@live-board/shared";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { AppError } from "./http/app-error.ts";
-import { parseId, parseMoveCard, parseNewCard } from "./http/validate.ts";
+import {
+  parseId,
+  parseMoveCard,
+  parseNewCard,
+  parseUpdateCard,
+} from "./http/validate.ts";
 import { noopHub, type BoardHub } from "./realtime/hub.ts";
 import type { CardStore } from "./store/card-store.ts";
 
@@ -77,6 +82,37 @@ export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
     }
 
     response.json(ok(cards));
+  });
+
+  app.patch("/api/cards/:cardId", async (request, response) => {
+    const cardId = parseId(request.params.cardId, "cardId");
+    const card = await store.updateCard(cardId, parseUpdateCard(request.body));
+
+    if (card === null) {
+      throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+    }
+
+    hub.publish(card.boardId, {
+      type: "card_updated",
+      cardId,
+      title: card.title,
+      description: card.description,
+    });
+
+    response.json(ok(card));
+  });
+
+  app.delete("/api/cards/:cardId", async (request, response) => {
+    const cardId = parseId(request.params.cardId, "cardId");
+    const deleted = await store.deleteCard(cardId);
+
+    if (deleted === null) {
+      throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+    }
+
+    hub.publish(deleted.boardId, { type: "card_deleted", cardId });
+
+    response.status(204).end();
   });
 
   app.use((_request, response) => {

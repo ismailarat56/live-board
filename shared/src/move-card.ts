@@ -52,3 +52,20 @@ export function moveCard(
 
   return [...untouched, ...renumber(sourceColumn), ...renumber(movedColumn)];
 }
+
+export function removeCard(cards: readonly Card[], cardId: number): Card[] | null {
+  const removed = cards.find((card) => card.id === cardId);
+
+  if (removed === undefined) {
+    return null;
+  }
+
+  const rest = cards.filter((card) => card.id !== cardId);
+
+  const inColumn = (card: Card): boolean =>
+    card.boardId === removed.boardId && card.status === removed.status;
+
+  const column = rest.filter(inColumn).toSorted(byPosition);
+
+  return [...rest.filter((card) => !inColumn(card)), ...renumber(column)];
+}

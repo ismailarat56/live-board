@@ -1,8 +1,10 @@
 import {
   MoveCardSchema,
   NewCardSchema,
+  UpdateCardSchema,
   type MoveCardInput,
   type NewCardInput,
+  type UpdateCardInput,
 } from "@live-board/shared";
 import type { z } from "zod";
 import { AppError } from "./app-error.ts";
@@ -26,7 +28,13 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
     return result.data;
   }
 
-  const field = result.error.issues[0]?.path[0];
+  const issue = result.error.issues[0];
+
+  if (issue?.code === "unrecognized_keys") {
+    throw new AppError(422, "UNKNOWN_FIELD", `Bilinmeyen alan: ${issue.keys.join(", ")}.`);
+  }
+
+  const field = issue?.path[0];
   const fieldError = typeof field === "string" ? FIELD_ERRORS[field] : undefined;
 
   if (fieldError === undefined) {
@@ -52,4 +60,14 @@ export function parseNewCard(body: unknown): NewCardInput {
 
 export function parseMoveCard(body: unknown): MoveCardInput {
   return parseBody(MoveCardSchema, body);
+}
+
+export function parseUpdateCard(body: unknown): UpdateCardInput {
+  const input = parseBody(UpdateCardSchema, body);
+
+  if (input.title === undefined && input.description === undefined) {
+    throw new AppError(422, "EMPTY_UPDATE", "En az bir alan gönderilmeli: title ya da description.");
+  }
+
+  return input;
 }

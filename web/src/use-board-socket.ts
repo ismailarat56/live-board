@@ -4,89 +4,123 @@ import {
   type BoardEvent,
 } from "@live-board/shared";
 import { useEffect, useEffectEvent, useState } from "react";
+import { reconnectDelay } from "./reconnect.ts";
 
-export type SocketStatus = "connecting" | "open" | "closed";
+export type SocketState =
+  | { status: "connecting" }
+  | { status: "open" }
+  | { status: "waiting"; attempt: number; delayMs: number };
 
 interface UseBoardSocketOptions {
   boardId: number;
-  connection: number;
   onWelcome: () => void;
   onEvent: (event: BoardEvent) => void;
 }
 
+interface BoardSocket {
+  state: SocketState;
+  reconnectNow: () => void;
+}
+
 export function useBoardSocket({
   boardId,
-  connection,
   onWelcome,
   onEvent,
-}: UseBoardSocketOptions): SocketStatus {
-  const [status, setStatus] = useState<SocketStatus>("connecting");
+}: UseBoardSocketOptions): BoardSocket {
+  const [state, setState] = useState<SocketState>({ status: "connecting" });
+  const [connection, setConnection] = useState(0);
   const handleWelcome = useEffectEvent(onWelcome);
   const handleEvent = useEffectEvent(onEvent);
 
   useEffect(() => {
-    let ignore = false;
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${location.host}/ws?boardId=${boardId}`);
+    let stopped = false;
+    let socket: WebSocket | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
 
-    setStatus("connecting");
+    function connect() {
+      timer = undefined;
+      setState({ status: "connecting" });
 
-    socket.addEventListener("open", () => {
-      if (!ignore) {
-        setStatus("open");
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const current = new WebSocket(`${protocol}//${location.host}/ws?boardId=${boardId}`);
+      socket = current;
+
+      current.addEventListener("open", () => {
+        if (!stopped) {
+          setState({ status: "open" });
+        }
+      });
+
+      current.addEventListener("message", (event) => {
+        if (stopped) {
+          return;
+        }
+
+        let json: unknown;
+
+        try {
+          json = JSON.parse(String(event.data));
+        } catch {
+          return;
+        }
+
+        const parsed = ServerMessageSchema.safeParse(json);
+
+        if (!parsed.success) {
+          console.error("Beklenmeyen WebSocket mesajı:", json);
+          return;
+        }
+
+        const message = parsed.data;
+
+        switch (message.type) {
+          case "welcome":
+            failures = 0;
+            handleWelcome();
+            break;
+          case "event":
+            handleEvent(message.event);
+            break;
+          case "pong":
+            break;
+          case "error":
+            console.warn(`Sunucu hatası (${message.code}): ${message.message}`);
+            break;
+          default:
+            assertNever(message);
+        }
+      });
+
+      current.addEventListener("close", () => {
+        if (stopped) {
+          return;
+        }
+
+        const delayMs = reconnectDelay(failures);
+        failures += 1;
+        setState({ status: "waiting", attempt: failures, delayMs });
+        timer = setTimeout(connect, delayMs);
+      });
+    }
+
+    function handleOnline() {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        connect();
       }
-    });
+    }
 
-    socket.addEventListener("message", (event) => {
-      if (ignore) {
-        return;
-      }
-
-      let json: unknown;
-
-      try {
-        json = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-
-      const parsed = ServerMessageSchema.safeParse(json);
-
-      if (!parsed.success) {
-        console.error("Beklenmeyen WebSocket mesajı:", json);
-        return;
-      }
-
-      const message = parsed.data;
-
-      switch (message.type) {
-        case "welcome":
-          handleWelcome();
-          break;
-        case "event":
-          handleEvent(message.event);
-          break;
-        case "pong":
-          break;
-        case "error":
-          console.warn(`Sunucu hatası (${message.code}): ${message.message}`);
-          break;
-        default:
-          assertNever(message);
-      }
-    });
-
-    socket.addEventListener("close", () => {
-      if (!ignore) {
-        setStatus("closed");
-      }
-    });
+    connect();
+    window.addEventListener("online", handleOnline);
 
     return () => {
-      ignore = true;
-      socket.close();
+      stopped = true;
+      clearTimeout(timer);
+      socket?.close();
+      window.removeEventListener("online", handleOnline);
     };
   }, [boardId, connection]);
 
-  return status;
+  return { state, reconnectNow: () => setConnection((value) => value + 1) };
 }

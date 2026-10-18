@@ -1,4 +1,6 @@
 import type { Card } from "@live-board/shared";
+import { useState } from "react";
+import { EditCardForm } from "./EditCardForm.tsx";
 import type { Direction } from "./move-target.ts";
 
 const DIRECTIONS: readonly Direction[] = ["left", "up", "down", "right"];
@@ -22,9 +24,21 @@ interface CardItemProps {
   busy: boolean;
   canMove: (direction: Direction) => boolean;
   onMove: (direction: Direction) => void;
+  onSaved: (card: Card) => void;
+  onDelete: () => void;
 }
 
-export function CardItem({ card, busy, canMove, onMove }: CardItemProps) {
+export function CardItem({ card, busy, canMove, onMove, onSaved, onDelete }: CardItemProps) {
+  const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
+
+  if (mode === "edit") {
+    return (
+      <li className="card">
+        <EditCardForm card={card} onSaved={onSaved} onClose={() => setMode("view")} />
+      </li>
+    );
+  }
+
   return (
     <li className="card">
       <h3>{card.title}</h3>
@@ -43,6 +57,36 @@ export function CardItem({ card, busy, canMove, onMove }: CardItemProps) {
           </button>
         ))}
       </div>
+      {mode === "confirm" ? (
+        <div className="card-actions" role="group" aria-label={`${card.title}: silme onayı`}>
+          <span>Silinsin mi?</span>
+          <button type="button" className="danger" disabled={busy} onClick={onDelete}>
+            Evet, sil
+          </button>
+          <button type="button" onClick={() => setMode("view")}>
+            Vazgeç
+          </button>
+        </div>
+      ) : (
+        <div className="card-actions">
+          <button
+            type="button"
+            aria-label={`${card.title}: düzenle`}
+            disabled={busy}
+            onClick={() => setMode("edit")}
+          >
+            Düzenle
+          </button>
+          <button
+            type="button"
+            aria-label={`${card.title}: sil`}
+            disabled={busy}
+            onClick={() => setMode("confirm")}
+          >
+            Sil
+          </button>
+        </div>
+      )}
     </li>
   );
 }

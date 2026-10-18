@@ -19,7 +19,7 @@ async function startServer(t: TestContext, heartbeatMs?: number) {
   const hub = createHub();
   const server = createApp(store, hub).listen(0, "127.0.0.1");
   await once(server, "listening");
-  attachWebSocket(server, hub, {
+  const sockets = attachWebSocket(server, hub, {
     boardExists: async (boardId) => (await store.findBoard(boardId)) !== null,
     ...(heartbeatMs === undefined ? {} : { heartbeatMs }),
   });
@@ -74,7 +74,7 @@ async function startServer(t: TestContext, heartbeatMs?: number) {
     });
   }
 
-  return { connect, post, hub: hub satisfies BoardHub, host };
+  return { connect, post, hub: hub satisfies BoardHub, host, sockets };
 }
 
 async function waitForCount(hub: BoardHub, expected: number): Promise<void> {
@@ -217,4 +217,16 @@ test("pong döndürmeyen bağlantı iki turda kapatılır, yanıt veren açık k
   await waitForCount(hub, 1);
   assert.equal(hub.count(1), 1);
   assert.equal(healthy.socket.readyState, WebSocket.OPEN);
+});
+
+test("kapanışta istemciler 1001 ve bir açıklamayla kapatılır", async (t) => {
+  const { connect, sockets } = await startServer(t);
+  const client = await connect();
+  await client.next();
+
+  sockets.close();
+  const [event] = (await once(client.socket, "close")) as [{ code: number; reason: string }];
+
+  assert.equal(event.code, 1001);
+  assert.equal(event.reason, "Sunucu kapanıyor");
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { moveCard, type Card, type CardStatus } from "@live-board/shared";
+import { moveCard, removeCard, type Card, type CardStatus } from "@live-board/shared";
 
 function makeCard(id: number, status: CardStatus, position: number): Card {
   return {
@@ -79,5 +79,51 @@ describe("moveCard", () => {
 
   it("olmayan kart için null döner", () => {
     assert.equal(moveCard(board, 99, { status: "done", position: 0 }), null);
+  });
+});
+
+describe("removeCard", () => {
+  it("kartı çıkarır ve sütununu 0'dan boşluksuz numaralar", () => {
+    const result = removeCard(board, 2);
+
+    assert.ok(result);
+    assert.deepEqual(column(result, "todo"), [1, 3]);
+    assert.deepEqual(positions(result, "todo"), [0, 1]);
+  });
+
+  it("başka sütunlara dokunmaz", () => {
+    const resultFromBoard = removeCard(board, 1);
+
+    assert.ok(resultFromBoard);
+    assert.deepEqual(
+      resultFromBoard.find((card) => card.id === 4),
+      board.find((card) => card.id === 4)
+    );
+    const cards = [
+      makeCard(3, "todo", 2),
+      makeCard(1, "todo", 0),
+      makeCard(2, "todo", 1),
+      makeCard(4, "doing", 5),
+      { ...makeCard(5, "todo", 7), boardId: 2 },
+    ];
+    const before = structuredClone(cards);
+    const result = removeCard(cards, 1);
+
+    assert.deepEqual(result, [
+      cards[3], cards[4],
+      { ...cards[2], position: 0 },
+      { ...cards[0], position: 1 },
+    ]);
+    assert.deepEqual(cards, before);
+  });
+
+  it("olmayan kart için null döner ve diziyi değiştirmez", () => {
+    const before = structuredClone(board);
+
+    assert.equal(removeCard(board, 99), null);
+    removeCard(board, 1);
+    assert.deepEqual(board, before);
+    assert.equal(removeCard([], 1), null);
+    assert.deepEqual(removeCard([makeCard(1, "todo", 0)], 1), []);
   });
 });

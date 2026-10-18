@@ -1,4 +1,4 @@
-import { CARD_STATUSES, moveCard, type Card } from "@live-board/shared";
+import { CARD_STATUSES, moveCard, removeCard, type Card } from "@live-board/shared";
 import type { Board } from '../domain/board.ts';
 import type { CardStore } from './card-store.ts';
 
@@ -56,6 +56,38 @@ export function createMemoryStore(): CardStore {
 			cards = next;
 
 			return sortedCards(boardId);
+		},
+
+		async updateCard(cardId, input) {
+			const current = cards.find((card) => card.id === cardId);
+
+			if (current === undefined) {
+				return null;
+			}
+
+			const updated: Card = {
+				...current,
+				title: input.title ?? current.title,
+				description:
+					input.description === undefined ? current.description : input.description,
+			};
+
+			cards = cards.map((card) => (card.id === cardId ? updated : card));
+
+			return updated;
+		},
+
+		async deleteCard(cardId) {
+			const boardId = cards.find((card) => card.id === cardId)?.boardId;
+			const next = removeCard(cards, cardId);
+
+			if (next === null || boardId === undefined) {
+				return null;
+			}
+
+			cards = next;
+
+			return { boardId };
 		},
 	};
 }

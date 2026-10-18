@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   applyBoardEvent,
   moveCard,
+  removeCard,
   type BoardEvent,
   type Card,
   type CardStatus,
@@ -85,10 +86,55 @@ describe("applyBoardEvent", () => {
     const removed = applyBoardEvent(start, { type: "card_deleted", cardId: 2 });
 
     assert.deepEqual(
-      removed.map((card) => card.id),
+      removed.map((card) => card.id).toSorted((a, b) => a - b),
       [1, 3]
     );
     assert.deepEqual(applyBoardEvent(start, { type: "card_deleted", cardId: 99 }), start);
+  });
+
+  it("card_deleted sunucudaki removeCard ile aynı sonucu verir", () => {
+    const serverResult = removeCard(start, 1);
+    assert.ok(serverResult !== null);
+
+    const event: BoardEvent = { type: "card_deleted", cardId: 1 };
+
+    assert.deepEqual(applyBoardEvent(start, event), serverResult);
+    assert.deepEqual(applyBoardEvent(serverResult, event), serverResult);
+    assert.deepEqual(serverResult.find((card) => card.id === 2), { ...start[1], position: 0 });
+  });
+
+  it("card_updated yalnız başlığı ve açıklamayı değiştirir", () => {
+    const before = structuredClone(start);
+    const event: BoardEvent = {
+      type: "card_updated", cardId: 2, title: "Yeni başlık", description: "Açıklama",
+    };
+    const once = applyBoardEvent(start, event);
+
+    assert.deepEqual(once, [start[0], { ...start[1], title: "Yeni başlık", description: "Açıklama" }, start[2]]);
+    assert.deepEqual(applyBoardEvent(once, event), once);
+    assert.deepEqual(applyBoardEvent(once, { ...event, description: null }).find((card) => card.id === 2)?.description, null);
+    assert.deepEqual(applyBoardEvent(start, { ...event, cardId: 99 }), start);
+    assert.deepEqual(start, before);
+  });
+
+  it("geç gelen card_updated kartı eski sütununa geri götürmez", () => {
+    const moved = applyBoardEvent(start, {
+      type: "card_moved",
+      cardId: 2,
+      toStatus: "done",
+      toPosition: 0,
+    });
+    const next = applyBoardEvent(moved, {
+      type: "card_updated",
+      cardId: 2,
+      title: "Yeni başlık",
+      description: null,
+    });
+    const card = next.find((item) => item.id === 2);
+
+    assert.equal(card?.status, "done");
+    assert.equal(card?.position, 0);
+    assert.equal(card?.title, "Yeni başlık");
   });
 
   it("girdi diziyi değiştirmez", () => {

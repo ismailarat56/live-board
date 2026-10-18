@@ -14,6 +14,12 @@ export const BoardEventSchema = z.discriminatedUnion("type", [
     toPosition: z.number().int().min(0),
   }),
   z.object({
+    type: z.literal("card_updated"),
+    cardId: z.number().int().positive(),
+    title: z.string(),
+    description: z.string().nullable(),
+  }),
+  z.object({
     type: z.literal("card_deleted"),
     cardId: z.number().int().positive(),
   }),
@@ -27,6 +33,8 @@ export function describeEvent(event: BoardEvent): string {
       return `Yeni kart: ${event.card.title}`;
     case "card_moved":
       return `Kart ${event.cardId} -> ${statusLabel(event.toStatus)}`;
+    case "card_updated":
+      return `Kart ${event.cardId} düzenlendi: ${event.title}`;
     case "card_deleted":
       return `Kart ${event.cardId} silindi`;
     default:

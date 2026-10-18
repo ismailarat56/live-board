@@ -4,6 +4,7 @@ import {
   type Card,
   type MoveCardInput,
   type NewCardInput,
+  type UpdateCardInput,
 } from "@live-board/shared";
 import { z } from "zod";
 
@@ -33,6 +34,16 @@ async function request<T>(
     });
   } catch {
     throw new ApiError(0, "NETWORK_ERROR", "Sunucuya ulaşılamadı.");
+  }
+
+  if (response.status === 204) {
+    const empty = dataSchema.safeParse(undefined);
+
+    if (empty.success) {
+      return empty.data;
+    }
+
+    throw new ApiError(204, "UNEXPECTED_RESPONSE", "Sunucu boş bir yanıt döndü.");
   }
 
   const json: unknown = await response.json().catch(() => null);
@@ -82,4 +93,15 @@ export function moveCard(cardId: number, input: MoveCardInput): Promise<Card[]> 
     method: "PATCH",
     body: JSON.stringify(input),
   });
+}
+
+export function updateCard(cardId: number, input: UpdateCardInput): Promise<Card> {
+  return request(`/api/cards/${cardId}`, CardSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteCard(cardId: number): Promise<void> {
+  return request(`/api/cards/${cardId}`, z.void(), { method: "DELETE" });
 }

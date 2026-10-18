@@ -85,6 +85,33 @@ test("sütun sonundan büyük position kesilmiş değerle yayınlanır", async (
   });
 });
 
+test("kart düzenlenince card_updated son haliyle yayınlanır", async (t) => {
+  const { published, send } = await startApi(t);
+  await send("POST", "/api/boards/1/cards", { title: "Bir", description: "not" });
+  published.length = 0;
+
+  const response = await send("PATCH", "/api/cards/1", { title: "Renk paleti" });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(published, [
+    {
+      boardId: 1,
+      event: { type: "card_updated", cardId: 1, title: "Renk paleti", description: "not" },
+    },
+  ]);
+});
+
+test("kart silinince card_deleted yayınlanır", async (t) => {
+  const { published, send } = await startApi(t);
+  await send("POST", "/api/boards/1/cards", { title: "Bir" });
+  published.length = 0;
+
+  const response = await send("DELETE", "/api/cards/1");
+
+  assert.equal(response.status, 204);
+  assert.deepEqual(published, [{ boardId: 1, event: { type: "card_deleted", cardId: 1 } }]);
+});
+
 test("reddedilen istekler olay yayınlamaz", async (t) => {
   const { published, send } = await startApi(t);
 
@@ -92,6 +119,9 @@ test("reddedilen istekler olay yayınlamaz", async (t) => {
   await send("POST", "/api/boards/9/cards", { title: "Var mı" });
   await send("PATCH", "/api/cards/99/move", { status: "done", position: 0 });
   await send("PATCH", "/api/cards/1/move", { status: "blocked", position: 0 });
+  await send("PATCH", "/api/cards/99", { title: "Yok" });
+  await send("PATCH", "/api/cards/1", {});
+  await send("DELETE", "/api/cards/99");
 
   assert.deepEqual(published, []);
 });

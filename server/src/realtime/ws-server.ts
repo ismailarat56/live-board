@@ -42,11 +42,15 @@ function sendMessage(socket: WebSocket, message: ServerMessage): void {
   }
 }
 
+export interface WebSocketHandle {
+  close(): void;
+}
+
 export function attachWebSocket(
   server: Server,
   hub: BoardHub,
   options: WebSocketOptions
-): void {
+): WebSocketHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });
   const alive = new WeakSet<WebSocket>();
 
@@ -158,4 +162,14 @@ export function attachWebSocket(
       console.error("WebSocket hatası:", error.message);
     });
   }
+
+  return {
+    close() {
+      clearInterval(heartbeat);
+
+      for (const client of wss.clients) {
+        client.close(1001, "Sunucu kapanıyor");
+      }
+    },
+  };
 }

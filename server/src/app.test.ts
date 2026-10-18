@@ -11,6 +11,7 @@ interface TestResponse<T> {
 }
 
 interface TestApi {
+  send(method: string, path: string, body?: unknown): Promise<Response>;
   request<T>(method: string, path: string, body?: unknown): Promise<TestResponse<T>>;
 }
 
@@ -23,13 +24,18 @@ async function startApi(t: TestContext): Promise<TestApi> {
   assert.ok(address !== null && typeof address === "object");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
+  function send(method: string, path: string, body?: unknown): Promise<Response> {
+    return fetch(baseUrl + path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+  }
+
   return {
+    send,
     async request<T>(method: string, path: string, body?: unknown) {
-      const response = await fetch(baseUrl + path, {
-        method,
-        headers: { "content-type": "application/json" },
-        body: body === undefined ? null : JSON.stringify(body),
-      });
+      const response = await send(method, path, body);
 
       return {
         status: response.status,
@@ -110,6 +116,52 @@ test("PATCH kartı başka sütuna taşır ve sıraları yeniden numaralar", asyn
   );
 });
 
+test("PATCH /api/cards/:cardId başlığı düzenler, açıklamayı null ile temizler", async (t) => {
+  const api = await startApi(t);
+  await api.request("POST", "/api/boards/1/cards", { title: "Bir", description: "eski not" });
+
+  const renamed = await api.request<Card>("PATCH", "/api/cards/1", { title: "  Renk paleti  " });
+
+  assert.equal(renamed.status, 200);
+  assert.ok(renamed.body.success);
+  assert.equal(renamed.body.data.title, "Renk paleti");
+  assert.equal(renamed.body.data.description, "eski not");
+
+  const cleared = await api.request<Card>("PATCH", "/api/cards/1", { description: null });
+
+  assert.ok(cleared.body.success);
+  assert.equal(cleared.body.data.title, "Renk paleti");
+  assert.equal(cleared.body.data.description, null);
+  assert.equal(cleared.body.data.status, "todo");
+});
+
+test("DELETE kartı siler, 204 döner ve sütunu yeniden numaralar", async (t) => {
+  const api = await startApi(t);
+  await api.request("POST", "/api/boards/1/cards", { title: "Bir" });
+  await api.request("POST", "/api/boards/1/cards", { title: "İki" });
+  await api.request("POST", "/api/boards/1/cards", { title: "Üç" });
+
+  const response = await api.send("DELETE", "/api/cards/1");
+
+  assert.equal(response.status, 204);
+  assert.equal(await response.text(), "");
+
+  const list = await api.request<Card[]>("GET", "/api/boards/1/cards");
+
+  assert.ok(list.body.success);
+  assert.deepEqual(
+    list.body.data.map((card) => [card.title, card.position]),
+    [
+      ["İki", 0],
+      ["Üç", 1],
+    ]
+  );
+
+  const again = await api.request("DELETE", "/api/cards/1");
+
+  assert.equal(again.status, 404);
+});
+
 test("hatalı istekler doğru durum ve hata koduyla döner", async (t) => {
   const api = await startApi(t);
 
@@ -125,6 +177,13 @@ test("hatalı istekler doğru durum ve hata koduyla döner", async (t) => {
     { method: "PATCH", path: "/api/cards/1/move", body: { status: "done", position: 1.5 }, status: 422, code: "INVALID_POSITION" },
     { method: "PATCH", path: "/api/cards/1/move", body: { status: "later", position: 0 }, status: 422, code: "INVALID_STATUS" },
     { method: "PATCH", path: "/api/cards/42/move", body: { status: "done", position: 0 }, status: 404, code: "CARD_NOT_FOUND" },
+    { method: "PATCH", path: "/api/cards/1", body: {}, status: 422, code: "EMPTY_UPDATE" },
+    { method: "PATCH", path: "/api/cards/1", body: { status: "done" }, status: 422, code: "UNKNOWN_FIELD" },
+    { method: "PATCH", path: "/api/cards/1", body: { title: "   " }, status: 422, code: "INVALID_TITLE" },
+    { method: "PATCH", path: "/api/cards/42", body: { title: "Yok" }, status: 404, code: "CARD_NOT_FOUND" },
+    { method: "PATCH", path: "/api/cards/abc", body: { title: "Yok" }, status: 400, code: "INVALID_ID" },
+    { method: "DELETE", path: "/api/cards/42", status: 404, code: "CARD_NOT_FOUND" },
+    { method: "DELETE", path: "/api/cards/0", status: 400, code: "INVALID_ID" },
     { method: "GET", path: "/api/nowhere", status: 404, code: "NOT_FOUND" },
   ];
 

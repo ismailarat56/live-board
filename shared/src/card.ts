@@ -19,17 +19,26 @@ export const CardSchema = z.object({
 
 export type Card = z.infer<typeof CardSchema>;
 
+const TitleSchema = z
+  .string()
+  .trim()
+  .min(1, { error: "Başlık boş olamaz." })
+  .max(200, { error: "Başlık en fazla 200 karakter olabilir." });
+
 export const NewCardSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1, { error: "Başlık boş olamaz." })
-    .max(200, { error: "Başlık en fazla 200 karakter olabilir." }),
+  title: TitleSchema,
   description: z.string().nullable().default(null),
   status: CardStatusSchema.default("todo"),
 });
 
 export type NewCardInput = z.output<typeof NewCardSchema>;
+
+export const UpdateCardSchema = z.strictObject({
+  title: TitleSchema.optional(),
+  description: z.string().nullable().optional(),
+});
+
+export type UpdateCardInput = z.output<typeof UpdateCardSchema>;
 
 export const MoveCardSchema = z.object({
   status: CardStatusSchema,

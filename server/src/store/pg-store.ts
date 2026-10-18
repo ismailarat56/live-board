@@ -1,7 +1,8 @@
-import { CardStatusSchema, moveCard, type Card } from "@live-board/shared";
+import { CardStatusSchema, moveCard, removeCard, type Card } from "@live-board/shared";
 import type { Pool } from "pg";
 import { z } from "zod";
 import type { Board } from "../domain/board.ts";
+import { diffCards } from "./card-diff.ts";
 import type { CardStore } from "./card-store.ts";
 
 const CARD_COLUMNS =
@@ -29,8 +30,21 @@ const CardRowSchema = z
     })
   );
 
+const BoardRowSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+});
+
+const BoardIdRowSchema = z.object({
+  board_id: z.number(),
+});
+
 function toCard(row: unknown): Card {
   return CardRowSchema.parse(row);
+}
+
+function toBoard(row: unknown): Board {
+  return BoardRowSchema.parse(row);
 }
 
 export function createPgStore(pool: Pool): CardStore {
@@ -46,14 +60,73 @@ export function createPgStore(pool: Pool): CardStore {
     return result.rows.map(toCard);
   }
 
+  async function changeBoard(
+    cardId: number,
+    change: (cards: Card[]) => Card[] | null
+  ): Promise<number | null> {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const found = await client.query(
+        "SELECT board_id FROM cards WHERE id = $1",
+        [cardId]
+      );
+      const row = found.rows[0];
+
+      if (row === undefined) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      const boardId = BoardIdRowSchema.parse(row).board_id;
+      const current = await client.query(
+        `SELECT ${CARD_COLUMNS} FROM cards WHERE board_id = $1 FOR UPDATE`,
+        [boardId]
+      );
+      const before = current.rows.map(toCard);
+      const after = change(before);
+
+      if (after === null) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+
+      const { removed, changed } = diffCards(before, after);
+
+      for (const id of removed) {
+        await client.query("DELETE FROM cards WHERE id = $1", [id]);
+      }
+
+      for (const card of changed) {
+        await client.query(
+          "UPDATE cards SET status = $1, position = $2 WHERE id = $3",
+          [card.status, card.position, card.id]
+        );
+      }
+
+      await client.query("COMMIT");
+
+      return boardId;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     async findBoard(boardId) {
-      const result = await pool.query<Board>(
+      const result = await pool.query(
         "SELECT id, name FROM boards WHERE id = $1",
         [boardId]
       );
 
-      return result.rows[0] ?? null;
+      const row = result.rows[0];
+
+      return row === undefined ? null : toBoard(row);
     },
 
     listCards,
@@ -77,52 +150,37 @@ export function createPgStore(pool: Pool): CardStore {
     },
 
     async move(cardId, target) {
-      const client = await pool.connect();
-      let boardId: number;
+      const boardId = await changeBoard(cardId, (cards) =>
+        moveCard(cards, cardId, target)
+      );
 
-      try {
-        await client.query("BEGIN");
+      return boardId === null ? null : listCards(boardId);
+    },
 
-        const found = await client.query<{ board_id: number }>(
-          "SELECT board_id FROM cards WHERE id = $1",
-          [cardId]
-        );
-        const foundBoardId = found.rows[0]?.board_id;
+    async updateCard(cardId, input) {
+      const result = await pool.query(
+        `UPDATE cards
+            SET title = CASE WHEN $2 THEN $3 ELSE title END,
+                description = CASE WHEN $4 THEN $5 ELSE description END
+          WHERE id = $1
+          RETURNING ${CARD_COLUMNS}`,
+        [
+          cardId,
+          input.title !== undefined,
+          input.title ?? null,
+          input.description !== undefined,
+          input.description ?? null,
+        ]
+      );
+      const row = result.rows[0];
 
-        if (foundBoardId === undefined) {
-          await client.query("ROLLBACK");
-          return null;
-        }
+      return row === undefined ? null : toCard(row);
+    },
 
-        boardId = foundBoardId;
+    async deleteCard(cardId) {
+      const boardId = await changeBoard(cardId, (cards) => removeCard(cards, cardId));
 
-        const current = await client.query(
-          `SELECT ${CARD_COLUMNS} FROM cards WHERE board_id = $1 FOR UPDATE`,
-          [boardId]
-        );
-        const next = moveCard(current.rows.map(toCard), cardId, target);
-
-        if (next === null) {
-          await client.query("ROLLBACK");
-          return null;
-        }
-
-        for (const card of next) {
-          await client.query(
-            "UPDATE cards SET status = $1, position = $2 WHERE id = $3",
-            [card.status, card.position, card.id]
-          );
-        }
-
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally {
-        client.release();
-      }
-
-      return listCards(boardId);
+      return boardId === null ? null : { boardId };
     },
   };
 }

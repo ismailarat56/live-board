@@ -161,6 +161,42 @@ button:disabled {
   background: #16a34a;
 }
 
-.connection-closed::before {
-  background: #dc2626;
+.connection-waiting::before {
+  background: #d97706;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.875rem;
+}
+
+.card-actions button {
+  padding: 2px 8px;
+  font-size: 0.8125rem;
+}
+
+.card-actions .danger {
+  border-color: #cf222e;
+  color: #cf222e;
+}
+
+.edit-card {
+  display: grid;
+  gap: 6px;
+}
+
+.edit-card input,
+.edit-card textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid #c9ccd1;
+  border-radius: 6px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 4px;
 }

@@ -18,7 +18,7 @@ const card = {
 };
 
 describe("BoardEventSchema", () => {
-  it("üç olay türünü de kabul eder", () => {
+  it("dört olay türünü de kabul eder", () => {
     assert.ok(BoardEventSchema.safeParse({ type: "card_created", card }).success);
     assert.ok(
       BoardEventSchema.safeParse({
@@ -29,6 +29,16 @@ describe("BoardEventSchema", () => {
       }).success
     );
     assert.ok(BoardEventSchema.safeParse({ type: "card_deleted", cardId: 7 }).success);
+    assert.ok(BoardEventSchema.safeParse({
+      type: "card_updated", cardId: 7, title: "Yeni başlık", description: null,
+    }).success);
+  });
+
+  it("card_updated açıklamayı atlayamaz: null ya da metin olmalı", () => {
+    assert.equal(
+      BoardEventSchema.safeParse({ type: "card_updated", cardId: 7, title: "Yeni" }).success,
+      false
+    );
   });
 
   it("bilinmeyen türü reddeder", () => {
@@ -42,6 +52,7 @@ describe("BoardEventSchema", () => {
       { type: "card_moved", cardId: 7, toStatus: "doing", toPosition: -1 },
       { type: "card_moved", cardId: "7", toStatus: "doing", toPosition: 0 },
       { type: "card_created", card: { ...card, status: "waiting" } },
+      { type: "card_updated", cardId: 7, title: 123, description: null },
     ];
 
     for (const value of bad) {
@@ -53,6 +64,10 @@ describe("BoardEventSchema", () => {
     assert.equal(
       describeEvent({ type: "card_moved", cardId: 7, toStatus: "done", toPosition: 0 }),
       "Kart 7 -> Bitti"
+    );
+    assert.equal(
+      describeEvent({ type: "card_updated", cardId: 7, title: "Yeni başlık", description: null }),
+      "Kart 7 düzenlendi: Yeni başlık"
     );
   });
 });

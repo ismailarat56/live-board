@@ -8,9 +8,19 @@ interface ColumnProps {
   busy: boolean;
   canMove: (card: Card, direction: Direction) => boolean;
   onMove: (card: Card, direction: Direction) => void;
+  onSaved: (card: Card) => void;
+  onDelete: (card: Card) => void;
 }
 
-export function Column({ status, cards, busy, canMove, onMove }: ColumnProps) {
+export function Column({
+  status,
+  cards,
+  busy,
+  canMove,
+  onMove,
+  onSaved,
+  onDelete,
+}: ColumnProps) {
   return (
     <section className="column" aria-labelledby={`column-${status}`}>
       <h2 id={`column-${status}`}>
@@ -27,6 +37,8 @@ export function Column({ status, cards, busy, canMove, onMove }: ColumnProps) {
               busy={busy}
               canMove={(direction) => canMove(card, direction)}
               onMove={(direction) => onMove(card, direction)}
+              onSaved={onSaved}
+              onDelete={() => onDelete(card)}
             />
           ))}
         </ol>

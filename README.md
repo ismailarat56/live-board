@@ -12,13 +12,13 @@ Proje TypeScript ile, testleri ilk günden yazılarak geliştiriliyor.
 - `server/`: Node.js + Express API (TypeScript).
 - `server/src/domain/`: Pano tanımı, taşıma ve olay testleri; `moveCard` artık `shared` paketinde.
 - `server/src/http/`: Hata sınıfı ve gelen verinin zod ile doğrulanması.
-- `server/src/realtime/`: Aboneleri tutan hub ve WebSocket sunucusu (`ws`).
+- `server/src/realtime/`: Hub (aboneler), WebSocket sunucusu (`ws`), Redis bağlantıları ve köprüsü (`redis-relay`).
 - `server/src/store/`: Ortak asenkron `CardStore` arayüzü; bellek ve PostgreSQL depoları; `diffCards` ile yalnız değişen satırlar yazılır.
 - `server/src/db/`: Bağlantı havuzu, bağlantı kontrolü ve migration çalıştırıcısı.
 - `server/migrations/`: Sıra numaralı SQL dosyaları.
 - `server/playground/`: TypeScript, bağlantı havuzu, zod ve WebSocket alıştırmaları.
 - `web/`: React + TypeScript arayüzü (Vite); saf fonksiyonların testleri `src/*.test.ts` dosyalarında.
-- `compose.yaml`: PostgreSQL 18 (Docker), `127.0.0.1:5433`.
+- `compose.yaml`: PostgreSQL 18 (`127.0.0.1:5433`) ve Redis 8.8 (`127.0.0.1:6380`), Docker.
 
 ## Çalıştırma
 
@@ -34,11 +34,27 @@ npm run dev:server
 npm run dev:web # Başka bir terminalde; http://localhost:5173
 ```
 
-Vite, `/api`, `/health` ve `/ws` (WebSocket) isteklerini `localhost:4000` üzerindeki sunucuya iletir.
+İki sunucu ve iki arayüz (dört terminal):
+
+```text
+Kök klasörde:
+npm run dev:server                       birinci sunucu (server/.env'deki PORT, 4000)
+PORT=4001 npm run dev:server             ikinci sunucu; komutun önündeki değişken .env'dekini ezer
+npm run dev:web                          localhost:5173 --> 4000
+
+web klasöründe:
+API_PORT=4001 npm run dev -- --port 5174  localhost:5174 --> 4001
+```
+
+Kökte `npm run dev:web -- --port 5174` çalışmaz: npm `--port`'u kendi ayarı sanar, seçenek Vite'a ulaşmaz.
+
+İki sunucunun aynı veriyi ve olayları paylaşması için `server/.env` içinde `STORE=postgres`, `PUBSUB=redis`, ortak `DATABASE_URL` ve `REDIS_URL` ayarlı olmalıdır; örnek ortam dosyası bu düzeni kullanır.
+
+Vite, `/api`, `/health` ve `/ws` (WebSocket) isteklerini varsayılan olarak `localhost:4000` üzerindeki sunucuya iletir; `API_PORT` ile hedef port değiştirilebilir.
 
 `npm install` yalnız kökte çalıştırılır; bağımlılıklar kökteki `node_modules/` klasörüne, kilit dosyası kökteki `package-lock.json` dosyasına yazılır.
 
-`server/.env` yoksa sunucu varsayılan olarak bellek deposunu ve `4000` portunu kullanır. Bellekteki kartlar sunucu kapanınca kaybolur.
+`server/.env` yoksa sunucu varsayılan olarak bellek deposunu ve `4000` portunu kullanır. Bellekteki kartlar sunucu kapanınca kaybolur. `PUBSUB=local` ile Redis olmadan tek sunucu olarak çalışır (olaylar yalnız o sürecin içinde dağıtılır).
 
 Node tipleri kontrol etmez; tip kontrolü yalnız `npm run typecheck` (`tsc`) ile yapılır.
 
@@ -153,7 +169,7 @@ sunucu --> istemci   { type: "welcome", boardId, clients }
                     { type: "error", code, message }         INVALID_JSON | INVALID_MESSAGE | BINARY_NOT_SUPPORTED
 istemci --> sunucu   { type: "ping" }
 
-HTTP isteği --> store (kalıcı yazma) --> hub.publish(boardId, event) --> o panoya bağlı bütün soketler
+PUBSUB=local: HTTP isteği --> store (kalıcı yazma) --> hub.publish(boardId, event) --> o sunucuda o panoya bağlı soketler
 ```
 
 - Olay yalnız kayıt başarılı olduktan sonra yayınlanır; reddedilen istek olay üretmez.
@@ -164,15 +180,34 @@ HTTP isteği --> store (kalıcı yazma) --> hub.publish(boardId, event) --> o pa
 - Arayüz her `welcome` mesajında panoyu yeniden çeker: yayın, bağlantı kurulduktan sonraki olayları taşır, öncesini değil.
 - `card_updated`, kart kimliği yanında yalnız başlığı ve açıklamayı taşır; geç gelse bile kartın sütununa ve sırasına dokunmaz.
 - Bağlantı kapanınca arayüz otomatik yeniden dener. Bekleme üst sınırı 1 saniyeden başlayıp her başarısız denemede ikiye katlanır, 30 saniyede durur; gerçek bekleme bu sınırın yarısı ile tamamı arasında rastgele seçilir. Sayaç `welcome` geldiğinde sıfırlanır. `online` olayı veya “Şimdi dene” butonu beklemeyi iptal ederek hemen bağlantı başlatır.
-- Sunucu `SIGTERM` veya `SIGINT` aldığında kalp atışını durdurur, WebSocket istemcilerini `1001` ve “Sunucu kapanıyor” açıklamasıyla kapatır; ardından HTTP sunucusunu ve veritabanı havuzunu kapatıp `0` ile çıkar. Kapanış 5 saniyede tamamlanamazsa `1` ile zorla çıkar. Tekrarlanan sinyaller kapanışı yeniden başlatmaz.
+- Sunucu `SIGTERM` veya `SIGINT` aldığında kalp atışını durdurur, WebSocket istemcilerini `1001` ve “Sunucu kapanıyor” açıklamasıyla kapatır; ardından HTTP sunucusunu, veritabanı havuzunu ve Redis bağlantılarını kapatıp `0` ile çıkar. Kapanış 5 saniyede tamamlanamazsa `1` ile zorla çıkar. Tekrarlanan sinyaller kapanışı yeniden başlatmaz.
+
+## Redis ile Birden Fazla Sunucu
+
+`PUBSUB=redis` seçildiğinde olayın yolu:
+
+```text
+HTTP isteği --> store (kalıcı yazma) --> relay.publish --> Redis: PUBLISH board:<id> <olay JSON>
+Redis --> her sunucunun abone bağlantısı (PSUBSCRIBE board:*) --> JSON + BoardEventSchema --> hub.publish --> o sunucunun soketleri
+```
+
+- Yayın tek yoldan gider: sunucu kendi olayını da Redis'ten geri alarak dağıtır. Redis komutları sırayla işlediği için bütün sekmeler olayları aynı sırayla görür.
+- Her sunucuda iki Redis bağlantısı vardır: yayın bağlantısı (`disableOfflineQueue`: Redis yokken komutu bekletmez, hemen hata verir) ve abone bağlantısı (`duplicate()` ile aynı ayarlardan).
+- Redis'ten gelen mesaj dışarıdan gelen veridir: JSON'a ve `BoardEventSchema`'ya uymayan mesaj kaydedilip atılır.
+- Redis koparsa HTTP yazmaları sürer, olaylar kaybolur (“Redis'e yayınlanamadı”). Abone bağlantısı geri gelince her sunucu soketlerini `1012` “Yeniden eşitleme” ile kapatır; arayüz yeniden bağlanır ve panoyu baştan çeker.
+- Redis kapalıyken sunucu açılmaz: bağlanana kadar yaklaşık 2 saniyede bir yeniden dener.
+- Redis'te kalıcılık kapalıdır (`--save ""`, `--appendonly no`): yeniden başlayınca içi boştur. Bugün Redis yalnız mesaj taşıyor, veri saklamıyor.
 
 ## Doğrulama
+
+Veri dört yerde çalışma anında doğrulanır; aşağıdaki tablo bu dört yeri ve hata sonuçlarını gösterir.
 
 | Veri girişi | Dosya | Şema ve hata sonucu |
 | --- | --- | --- |
 | İstek gövdesi | `server/src/http/validate.ts` | `NewCardSchema`, `MoveCardSchema`, `UpdateCardSchema` → `400` / `422`. |
 | Veritabanı satırı | `server/src/store/pg-store.ts` | `CardRowSchema`, `BoardRowSchema`, `BoardIdRowSchema` → beklenmeyen satırda `500`. |
 | API yanıtı | `web/src/api.ts` | `apiResponseSchema(...)` → `UNEXPECTED_RESPONSE`. |
+| Redis mesajı | `server/src/realtime/redis-relay.ts` | `BoardEventSchema` → kaydedilip atılır. |
 
 Ortak şemalar `shared/src/` içinde bir kez yazılır; tipler `z.infer` ile şemadan çıkarılır. Bir alan değiştiğinde `npm run typecheck`, o alanı eski biçimiyle kullanan kod için hem sunucuda hem arayüzde hata verir.
 
@@ -199,7 +234,10 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 - Kopukluk sırasında oluşan olaylar sonradan tekrarlanmaz; yeniden bağlanınca pano baştan çekilir.
 - Olayların sıra numarası yoktur; iki kişi aynı anda kart taşırsa iki ekrandaki sıralama farklı bitebilir (8. gün).
 - İki kişi aynı kartın aynı alanını düzenlerse son kaydeden kazanır; farklı alanlar korunur (8. gün).
-- Hub yalnız tek sunucu sürecinin belleğindedir; ikinci sunucuya bağlı istemciler olayı almaz (Redis, 6. gün).
+- Redis pub/sub bir olayı en fazla bir kez iletir; Redis kopukken yayınlanan olay kaybolur (abone geri gelince istemciler yeniden eşitlenir).
+- Redis kesintisi sürerken arayüz “Canlı” görünür ama hiçbir olay almaz (kendi sunucusununkiler de Redis üzerinden gelir).
+- `welcome` mesajındaki `clients` yalnız o sunucuda aynı panoya bağlı istemcileri sayar.
+- Redis'te parola yoktur; yalnız `127.0.0.1`'den erişilir.
 - WebSocket bağlantısı için kimlik doğrulama yoktur; adresi bilen her istemci panoyu dinleyebilir.
 - Taşıma ve silme sürerken bütün kart butonları kilitlidir; sonuç sunucudan dönünce ekran güncellenir (iyimser güncelleme yoktur).
 - Arayüzde yalnız saf fonksiyonların testi vardır; bileşenler tarayıcıda elle denenir.
@@ -207,7 +245,6 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 
 ## Sonraki Adımlar (taslak)
 
-- Redis: pub/sub ile birden fazla sunucu, önbellek.
-- Arka plan işleri (kuyruk) ve bildirimler.
+- Redis ile arka plan işleri (kuyruk) ve önbellek.
 - Aynı kartın aynı anda değişmesi: sıra numarası ve çakışma çözümü.
 - İstemci tarafı kalp atışı: donmuş sunucuyu fark edip yeniden bağlanmak.

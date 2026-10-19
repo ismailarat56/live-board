@@ -4,6 +4,10 @@ export type StoreConfig =
   | { kind: "memory" }
   | { kind: "postgres"; databaseUrl: string };
 
+export type PubSubConfig =
+  | { kind: "local" }
+  | { kind: "redis"; redisUrl: string };
+
 function readPort(): number {
   const raw = process.env.PORT;
 
@@ -44,7 +48,28 @@ function readStore(): StoreConfig {
   throw new Error("STORE memory veya postgres olmalıdır.");
 }
 
+function readPubSub(): PubSubConfig {
+  const kind = process.env.PUBSUB ?? "local";
+
+  if (kind === "local") {
+    return { kind };
+  }
+
+  if (kind === "redis") {
+    const redisUrl = process.env.REDIS_URL;
+
+    if (redisUrl === undefined || redisUrl === "") {
+      throw new Error("PUBSUB=redis için REDIS_URL tanımlı olmalı; server/.env dosyasına bak.");
+    }
+
+    return { kind, redisUrl };
+  }
+
+  throw new Error("PUBSUB local veya redis olmalıdır.");
+}
+
 export const config = {
   port: readPort(),
   store: readStore(),
+  pubsub: readPubSub(),
 } as const;

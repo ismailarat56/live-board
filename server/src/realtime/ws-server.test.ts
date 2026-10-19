@@ -230,3 +230,18 @@ test("kapanışta istemciler 1001 ve bir açıklamayla kapatılır", async (t) =
   assert.equal(event.code, 1001);
   assert.equal(event.reason, "Sunucu kapanıyor");
 });
+
+test("resync istemcileri 1012 ile kapatır, yeni bağlantıyı kabul etmeye devam eder", async (t) => {
+  const { connect, sockets } = await startServer(t);
+  const client = await connect();
+  await client.next();
+
+  sockets.resync();
+  const [event] = (await once(client.socket, "close")) as [{ code: number; reason: string }];
+
+  assert.equal(event.code, 1012);
+  assert.equal(event.reason, "Yeniden eşitleme");
+
+  const again = await connect();
+  assert.equal((await again.next()).type, "welcome");
+});

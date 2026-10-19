@@ -43,6 +43,7 @@ function sendMessage(socket: WebSocket, message: ServerMessage): void {
 }
 
 export interface WebSocketHandle {
+  resync(): void;
   close(): void;
 }
 
@@ -164,6 +165,12 @@ export function attachWebSocket(
   }
 
   return {
+    resync() {
+      for (const client of wss.clients) {
+        client.close(1012, "Yeniden eşitleme");
+      }
+    },
+
     close() {
       clearInterval(heartbeat);
 

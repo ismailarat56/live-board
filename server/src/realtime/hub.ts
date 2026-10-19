@@ -4,9 +4,12 @@ export interface Subscriber {
   send(data: string): void;
 }
 
-export interface BoardHub {
-  subscribe(boardId: number, subscriber: Subscriber): () => void;
+export interface EventPublisher {
   publish(boardId: number, event: BoardEvent): void;
+}
+
+export interface BoardHub extends EventPublisher {
+  subscribe(boardId: number, subscriber: Subscriber): () => void;
   count(boardId: number): number;
 }
 

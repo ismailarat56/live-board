@@ -2,7 +2,9 @@ import { assertNever } from "@live-board/shared";
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
 import { createPool } from "./db/pool.ts";
-import { createHub } from "./realtime/hub.ts";
+import { createHub, type BoardHub, type EventPublisher } from "./realtime/hub.ts";
+import { connectRedis } from "./realtime/redis.ts";
+import { createRedisRelay } from "./realtime/redis-relay.ts";
 import { attachWebSocket } from "./realtime/ws-server.ts";
 import type { CardStore } from "./store/card-store.ts";
 import { createMemoryStore } from "./store/memory-store.ts";
@@ -27,9 +29,39 @@ function createStore(): StoreHandle {
   }
 }
 
+interface PubSubHandle {
+  events: EventPublisher;
+  onReconnect(listener: () => void): void;
+  close(): Promise<void>;
+}
+
+async function createPubSub(hub: BoardHub): Promise<PubSubHandle> {
+  switch (config.pubsub.kind) {
+    case "local":
+      return { events: hub, onReconnect: () => {}, close: async () => {} };
+    case "redis": {
+      const redis = await connectRedis(config.pubsub.redisUrl);
+      const relay = createRedisRelay(redis.publisher, redis.subscriber, hub);
+
+      await relay.start();
+
+      return {
+        events: relay,
+        onReconnect: (listener) => {
+          redis.subscriber.on("ready", listener);
+        },
+        close: redis.close,
+      };
+    }
+    default:
+      return assertNever(config.pubsub);
+  }
+}
+
 const { store, close: closeStore } = createStore();
 const hub = createHub();
-const app = createApp(store, hub);
+const pubsub = await createPubSub(hub);
+const app = createApp(store, pubsub.events);
 
 const server = app.listen(config.port, (error) => {
   if (error) {
@@ -37,12 +69,17 @@ const server = app.listen(config.port, (error) => {
   }
 
   console.log(
-    `Live Board API http://localhost:${config.port} adresinde çalışıyor (depo: ${config.store.kind}).`
+    `Live Board API http://localhost:${config.port} adresinde çalışıyor (depo: ${config.store.kind}, yayın: ${config.pubsub.kind}).`
   );
 });
 
 const sockets = attachWebSocket(server, hub, {
   boardExists: async (boardId) => (await store.findBoard(boardId)) !== null,
+});
+
+pubsub.onReconnect(() => {
+  console.log("Redis aboneliği geri geldi; istemciler yeniden eşitleniyor.");
+  sockets.resync();
 });
 
 let shuttingDown = false;
@@ -62,7 +99,7 @@ function shutdown(signal: NodeJS.Signals): void {
 
   sockets.close();
   server.close(() => {
-    closeStore()
+    Promise.all([closeStore(), pubsub.close()])
       .then(() => {
         console.log("Sunucu kapandı.");
         process.exit(0);

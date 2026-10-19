@@ -7,7 +7,7 @@ import {
   parseNewCard,
   parseUpdateCard,
 } from "./http/validate.ts";
-import { noopHub, type BoardHub } from "./realtime/hub.ts";
+import { noopHub, type EventPublisher } from "./realtime/hub.ts";
 import type { CardStore } from "./store/card-store.ts";
 
 const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
@@ -25,7 +25,7 @@ const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
   response.status(500).json(fail("INTERNAL_ERROR", "Beklenmeyen bir hata oluştu."));
 };
 
-export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
+export function createApp(store: CardStore, events: EventPublisher = noopHub): Express {
   const app = express();
 
   app.use(express.json({ limit: "20kb" }));
@@ -57,7 +57,7 @@ export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
 
     const card = await store.createCard(boardId, parseNewCard(request.body));
 
-    hub.publish(boardId, { type: "card_created", card });
+    events.publish(boardId, { type: "card_created", card });
 
     response.status(201).json(ok(card));
   });
@@ -73,7 +73,7 @@ export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
     const moved = cards.find((card) => card.id === cardId);
 
     if (moved !== undefined) {
-      hub.publish(moved.boardId, {
+      events.publish(moved.boardId, {
         type: "card_moved",
         cardId,
         toStatus: moved.status,
@@ -92,7 +92,7 @@ export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
       throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
     }
 
-    hub.publish(card.boardId, {
+    events.publish(card.boardId, {
       type: "card_updated",
       cardId,
       title: card.title,
@@ -110,7 +110,7 @@ export function createApp(store: CardStore, hub: BoardHub = noopHub): Express {
       throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
     }
 
-    hub.publish(deleted.boardId, { type: "card_deleted", cardId });
+    events.publish(deleted.boardId, { type: "card_deleted", cardId });
 
     response.status(204).end();
   });

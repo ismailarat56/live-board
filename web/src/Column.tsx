@@ -9,6 +9,7 @@ interface ColumnProps {
   canMove: (card: Card, direction: Direction) => boolean;
   onMove: (card: Card, direction: Direction) => void;
   onSaved: (card: Card) => void;
+  onStale: () => void;
   onDelete: (card: Card) => void;
 }
 
@@ -19,6 +20,7 @@ export function Column({
   canMove,
   onMove,
   onSaved,
+  onStale,
   onDelete,
 }: ColumnProps) {
   return (
@@ -38,6 +40,7 @@ export function Column({
               canMove={(direction) => canMove(card, direction)}
               onMove={(direction) => onMove(card, direction)}
               onSaved={onSaved}
+              onStale={onStale}
               onDelete={() => onDelete(card)}
             />
           ))}

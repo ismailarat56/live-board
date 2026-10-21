@@ -71,6 +71,10 @@ export function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Beklenmeyen bir hata oluştu.";
 }
 
+export function isVersionConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "VERSION_CONFLICT";
+}
+
 const HealthSchema = z.object({ status: z.string() });
 
 export function getHealth(): Promise<{ status: string }> {
@@ -95,13 +99,19 @@ export function moveCard(cardId: number, input: MoveCardInput): Promise<Card[]> 
   });
 }
 
-export function updateCard(cardId: number, input: UpdateCardInput): Promise<Card> {
+export function updateCard(
+  cardId: number,
+  input: UpdateCardInput,
+  expectedVersion: number
+): Promise<Card> {
   return request(`/api/cards/${cardId}`, CardSchema, {
     method: "PATCH",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, expectedVersion }),
   });
 }
 
-export function deleteCard(cardId: number): Promise<void> {
-  return request(`/api/cards/${cardId}`, z.void(), { method: "DELETE" });
+export function deleteCard(cardId: number, expectedVersion: number): Promise<void> {
+  return request(`/api/cards/${cardId}?expectedVersion=${expectedVersion}`, z.void(), {
+    method: "DELETE",
+  });
 }

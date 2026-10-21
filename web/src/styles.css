@@ -200,3 +200,16 @@ button:disabled {
   display: flex;
   gap: 4px;
 }
+
+.conflict {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #bf8700;
+  border-radius: 6px;
+  background: #fff8c5;
+}
+
+.conflict p {
+  margin: 0;
+}

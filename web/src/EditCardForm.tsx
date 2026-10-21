@@ -1,26 +1,27 @@
 import { UpdateCardSchema, type Card, type UpdateCardInput } from "@live-board/shared";
 import { useState, type KeyboardEvent, type SubmitEvent } from "react";
-import { errorMessage, updateCard } from "./api.ts";
+import { errorMessage, isVersionConflict, updateCard } from "./api.ts";
 
 interface EditCardFormProps {
   card: Card;
   onSaved: (card: Card) => void;
+  onStale: () => void;
   onClose: () => void;
 }
 
-export function EditCardForm({ card, onSaved, onClose }: EditCardFormProps) {
+export function EditCardForm({ card, onSaved, onStale, onClose }: EditCardFormProps) {
   const [initial] = useState(() => ({
     title: card.title,
     description: card.description ?? "",
+    version: card.version,
   }));
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState(false);
 
-  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function save(expectedVersion: number) {
     const changes: UpdateCardInput = {};
 
     if (title !== initial.title) {
@@ -47,11 +48,25 @@ export function EditCardForm({ card, onSaved, onClose }: EditCardFormProps) {
     setError(null);
 
     try {
-      onSaved(await updateCard(card.id, parsed.data));
+      onSaved(await updateCard(card.id, parsed.data, expectedVersion));
       onClose();
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (isVersionConflict(caught)) {
+        setConflict(true);
+        onStale();
+      } else {
+        setError(errorMessage(caught));
+      }
+
       setPending(false);
+    }
+  }
+
+  function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!conflict) {
+      void save(initial.version);
     }
   }
 
@@ -76,14 +91,33 @@ export function EditCardForm({ card, onSaved, onClose }: EditCardFormProps) {
         onChange={(event) => setDescription(event.target.value)}
         rows={2}
       />
-      <div className="edit-actions">
-        <button type="submit" disabled={pending}>
-          {pending ? "Kaydediliyor..." : "Kaydet"}
-        </button>
-        <button type="button" onClick={onClose} disabled={pending}>
-          Vazgeç
-        </button>
-      </div>
+      {conflict ? (
+        <div className="conflict" role="alert">
+          <p>Bu kart sen düzenlerken değişti. Şu anki hali:</p>
+          <p className="conflict-current">
+            <strong>{card.title}</strong>
+            {card.description && <span> — {card.description}</span>}
+          </p>
+          <p>Kaydedersen yalnız senin değiştirdiğin alanlar yazılır.</p>
+          <div className="edit-actions">
+            <button type="button" disabled={pending} onClick={() => void save(card.version)}>
+              {pending ? "Kaydediliyor..." : "Benimkini yine de kaydet"}
+            </button>
+            <button type="button" onClick={onClose} disabled={pending}>
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="edit-actions">
+          <button type="submit" disabled={pending}>
+            {pending ? "Kaydediliyor..." : "Kaydet"}
+          </button>
+          <button type="button" onClick={onClose} disabled={pending}>
+            Vazgeç
+          </button>
+        </div>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}

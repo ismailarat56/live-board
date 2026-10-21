@@ -1,6 +1,6 @@
 import { assertNever, CARD_STATUSES, type Card } from "@live-board/shared";
 import { useEffect, useReducer, useState } from "react";
-import { deleteCard, errorMessage, listCards, moveCard } from "./api.ts";
+import { deleteCard, errorMessage, isVersionConflict, listCards, moveCard } from "./api.ts";
 import { boardReducer, cardsInColumn, initialBoardState } from "./board-state.ts";
 import { Column } from "./Column.tsx";
 import { moveTarget, type Direction } from "./move-target.ts";
@@ -29,9 +29,10 @@ export function Board({ boardId }: BoardProps) {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const refresh = () => setAttempt((value) => value + 1);
   const socket = useBoardSocket({
     boardId,
-    onWelcome: () => setAttempt((value) => value + 1),
+    onWelcome: refresh,
     onEvent: (event) => dispatch({ type: "eventReceived", event }),
   });
 
@@ -57,7 +58,7 @@ export function Board({ boardId }: BoardProps) {
 
   function retry() {
     dispatch({ type: "retried" });
-    setAttempt((value) => value + 1);
+    refresh();
   }
 
   async function handleMove(cards: readonly Card[], card: Card, direction: Direction) {
@@ -84,10 +85,17 @@ export function Board({ boardId }: BoardProps) {
     setActionError(null);
 
     try {
-      await deleteCard(card.id);
+      await deleteCard(card.id, card.version);
       dispatch({ type: "cardDeleted", cardId: card.id });
     } catch (error) {
-      setActionError(errorMessage(error));
+      if (isVersionConflict(error)) {
+        setActionError(
+          "Kart sen silmeye karar verirken değişti; güncel hali ekranda. Yine de silmek istiyorsan yeniden sil."
+        );
+        refresh();
+      } else {
+        setActionError(errorMessage(error));
+      }
     } finally {
       setBusy(false);
     }
@@ -129,6 +137,14 @@ export function Board({ boardId }: BoardProps) {
             boardId={boardId}
             onCreated={(card) => dispatch({ type: "cardCreated", card })}
           />
+          {state.refreshError && (
+            <div className="form-error" role="alert">
+              <p>Pano yenilenemedi: {state.refreshError}</p>
+              <button type="button" onClick={retry}>
+                Yeniden yükle
+              </button>
+            </div>
+          )}
           {actionError && (
             <p className="form-error" role="alert">
               {actionError}
@@ -146,6 +162,7 @@ export function Board({ boardId }: BoardProps) {
                 }
                 onMove={(card, direction) => handleMove(state.cards, card, direction)}
                 onSaved={(card) => dispatch({ type: "cardUpdated", card })}
+                onStale={refresh}
                 onDelete={handleDelete}
               />
             ))}

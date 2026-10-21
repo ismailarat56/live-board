@@ -9,7 +9,7 @@ import {
 export type BoardState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; cards: Card[] };
+  | { status: "ready"; cards: Card[]; refreshError?: string };
 
 export type BoardAction =
   | { type: "retried" }
@@ -28,18 +28,23 @@ function applyWhenReady(state: BoardState, event: BoardEvent): BoardState {
     return state;
   }
 
-  return { status: "ready", cards: applyBoardEvent(state.cards, event) };
+  return { ...state, cards: applyBoardEvent(state.cards, event) };
 }
 
 export function boardReducer(state: BoardState, action: BoardAction): BoardState {
   switch (action.type) {
     case "retried":
-      return { status: "loading" };
+      return state.status === "ready" ? state : { status: "loading" };
     case "loaded":
-    case "cardsMoved":
       return { status: "ready", cards: action.cards };
+    case "cardsMoved":
+      return state.status === "ready"
+        ? { ...state, cards: action.cards }
+        : { status: "ready", cards: action.cards };
     case "failed":
-      return { status: "error", message: action.message };
+      return state.status === "ready"
+        ? { ...state, refreshError: action.message }
+        : { status: "error", message: action.message };
     case "cardCreated":
       return applyWhenReady(state, { type: "card_created", card: action.card });
     case "cardUpdated":
@@ -48,6 +53,7 @@ export function boardReducer(state: BoardState, action: BoardAction): BoardState
         cardId: action.card.id,
         title: action.card.title,
         description: action.card.description,
+        version: action.card.version,
       });
     case "cardDeleted":
       return applyWhenReady(state, { type: "card_deleted", cardId: action.cardId });

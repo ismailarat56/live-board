@@ -25,16 +25,30 @@ interface CardItemProps {
   canMove: (direction: Direction) => boolean;
   onMove: (direction: Direction) => void;
   onSaved: (card: Card) => void;
+  onStale: () => void;
   onDelete: () => void;
 }
 
-export function CardItem({ card, busy, canMove, onMove, onSaved, onDelete }: CardItemProps) {
+export function CardItem({
+  card,
+  busy,
+  canMove,
+  onMove,
+  onSaved,
+  onStale,
+  onDelete,
+}: CardItemProps) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
 
   if (mode === "edit") {
     return (
       <li className="card">
-        <EditCardForm card={card} onSaved={onSaved} onClose={() => setMode("view")} />
+        <EditCardForm
+          card={card}
+          onSaved={onSaved}
+          onStale={onStale}
+          onClose={() => setMode("view")}
+        />
       </li>
     );
   }

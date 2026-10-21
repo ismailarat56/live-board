@@ -13,7 +13,7 @@ Proje TypeScript ile, testleri ilk günden yazılarak geliştiriliyor.
 - `server/src/domain/`: Pano tanımı, taşıma ve olay testleri; `moveCard` artık `shared` paketinde.
 - `server/src/http/`: Hata sınıfı ve gelen verinin zod ile doğrulanması.
 - `server/src/realtime/`: Hub (aboneler), WebSocket sunucusu (`ws`), Redis bağlantıları ve köprüsü (`redis-relay`).
-- `server/src/store/`: Ortak asenkron `CardStore` arayüzü; bellek ve PostgreSQL depoları; `diffCards` ile yalnız değişen satırlar yazılır.
+- `server/src/store/`: `CardStore` arayüzü; bellekte ve PostgreSQL'de iki depo; iki depoda koşan sürüm sözleşmesi (`version-contract`); `diffCards`.
 - `server/src/db/`: Bağlantı havuzu, bağlantı kontrolü ve migration çalıştırıcısı.
 - `server/migrations/`: Sıra numaralı SQL dosyaları.
 - `server/playground/`: TypeScript, bağlantı havuzu, zod ve WebSocket alıştırmaları.
@@ -151,8 +151,10 @@ Kart sorgularından dönen satırlar `CardRowSchema` ile çalışma anında doğ
 | GET | `/api/boards/:boardId/cards` | Panodaki kartlar, sütun ve pozisyon sırasıyla. |
 | POST | `/api/boards/:boardId/cards` | `{ title, description?, status? }` ile kart oluşturur; `201` döner. |
 | PATCH | `/api/cards/:cardId/move` | `{ status, position }` ile kartı taşır; panonun bütün kartlarını döner. |
-| PATCH | `/api/cards/:cardId` | `{ title?, description? }` ile kartı düzenler ve kartı döner; en az bir alan gerekir, bilinmeyen alan `422` döndürür. |
-| DELETE | `/api/cards/:cardId` | Kartı siler ve gövdesiz `204` döner; sütundaki sonraki kartlar bir sıra kayar. |
+| PATCH | `/api/cards/:cardId` | `{ title?, description?, expectedVersion }` ile kartı düzenler ve kartı döner; en az bir içerik alanı gerekir, bilinmeyen alan `422` döndürür. |
+| DELETE | `/api/cards/:cardId?expectedVersion=N` | Kartı siler ve gövdesiz `204` döner; sütundaki sonraki kartlar bir sıra kayar. |
+
+`expectedVersion` uymazsa `409 VERSION_CONFLICT` döner ve kart değişmez (ayrıntı: [Sürüm ve Çakışma](#sürüm-ve-çakışma)).
 
 Düzenlemede gönderilmeyen alana dokunulmaz; `description: null` açıklamayı siler. Bu üç durum (yok, `null`, değer) SQL'de `CASE WHEN` ile ayrılır.
 
@@ -178,9 +180,23 @@ PUBSUB=local: HTTP isteği --> store (kalıcı yazma) --> hub.publish(boardId, e
 - Sunucu 30 saniyede bir ping gönderir; ilk turda ping gönderilen bağlantıdan ikinci tura kadar pong gelmezse bağlantıyı kapatır.
 - Gelen mesaj 1 KB ile sınırlıdır; mesajlar `ClientMessageSchema` ile doğrulanır.
 - Arayüz her `welcome` mesajında panoyu yeniden çeker: yayın, bağlantı kurulduktan sonraki olayları taşır, öncesini değil.
-- `card_updated`, kart kimliği yanında yalnız başlığı ve açıklamayı taşır; geç gelse bile kartın sütununa ve sırasına dokunmaz.
+- `card_updated` başlığı, açıklamayı ve sürümü taşır; geç gelse bile kartın sütununa ve sırasına dokunmaz, sürümü eldekinden büyük değilse yok sayılır.
 - Bağlantı kapanınca arayüz otomatik yeniden dener. Bekleme üst sınırı 1 saniyeden başlayıp her başarısız denemede ikiye katlanır, 30 saniyede durur; gerçek bekleme bu sınırın yarısı ile tamamı arasında rastgele seçilir. Sayaç `welcome` geldiğinde sıfırlanır. `online` olayı veya “Şimdi dene” butonu beklemeyi iptal ederek hemen bağlantı başlatır.
 - Sunucu `SIGTERM` veya `SIGINT` aldığında kalp atışını durdurur, WebSocket istemcilerini `1001` ve “Sunucu kapanıyor” açıklamasıyla kapatır; ardından HTTP sunucusunu, veritabanı havuzunu ve Redis bağlantılarını kapatıp `0` ile çıkar. Kapanış 5 saniyede tamamlanamazsa `1` ile zorla çıkar. Tekrarlanan sinyaller kapanışı yeniden başlatmaz.
+
+## Sürüm ve Çakışma
+
+| Alan veya durum | Anlamı |
+| --- | --- |
+| `version` | Her kartta bulunur; 1'den başlar, başlık ya da açıklama değişince bir artar. |
+| `expectedVersion` | İstemcinin gördüğü sürüm; PATCH gövdesinde, DELETE adresinde gönderilir. |
+| `409` | Sürüm uymuyor: kart bu arada değişti; hiçbir şey yazılmaz. |
+
+- Kontrol ve yazma tek SQL komutunda yapılır: `UPDATE ... WHERE id = $1 AND version = $6`. Önce okuyup sonra yazmak aynı sürümle gelen iki isteği birden geçirebilir; `test:db` içindeki yarış testi bunu yakalar. Silmede kontrol, `changeBoard` yardımcısının `FOR UPDATE` kilidinden sonra yapılır.
+- Sürüm sözleşmesi (`server/src/store/version-contract.ts`) iki depoda da koşar: `npm test` bellekteki depoda, `test:db` PostgreSQL'de.
+- Arayüz, düzenleme formu açıldığı andaki sürümü gönderir. `409` gelince taslak silinmez, panoyu yeniden çeker ve kartın güncel halini gösterir; “Benimkini yine de kaydet” yalnız değiştirilen alanları güncel sürümle yeniden yollar.
+- Taşıma sürüme bakmaz ve sürümü değiştirmez: sıra içerik değildir, son taşıyan kazanır.
+- İstemci, sürümü eldekinden büyük olmayan `card_updated` olayını ve kart düzenleme HTTP yanıtını yok sayar: geç gelen eski veri yeni hali ezmez.
 
 ## Redis ile Birden Fazla Sunucu
 
@@ -204,7 +220,7 @@ Veri dört yerde çalışma anında doğrulanır; aşağıdaki tablo bu dört ye
 
 | Veri girişi | Dosya | Şema ve hata sonucu |
 | --- | --- | --- |
-| İstek gövdesi | `server/src/http/validate.ts` | `NewCardSchema`, `MoveCardSchema`, `UpdateCardSchema` → `400` / `422`. |
+| İstek gövdesi | `server/src/http/validate.ts` | `NewCardSchema`, `MoveCardSchema`, `UpdateCardRequestSchema` → `400` / `422`. |
 | Veritabanı satırı | `server/src/store/pg-store.ts` | `CardRowSchema`, `BoardRowSchema`, `BoardIdRowSchema` → beklenmeyen satırda `500`. |
 | API yanıtı | `web/src/api.ts` | `apiResponseSchema(...)` → `UNEXPECTED_RESPONSE`. |
 | Redis mesajı | `server/src/realtime/redis-relay.ts` | `BoardEventSchema` → kaydedilip atılır. |
@@ -232,8 +248,10 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 
 - Sunucu kapanmadan donarsa (`kill -STOP`) arayüz bunu fark etmez, “Canlı” görünür; istemci tarafında kalp atışı yoktur.
 - Kopukluk sırasında oluşan olaylar sonradan tekrarlanmaz; yeniden bağlanınca pano baştan çekilir.
-- Olayların sıra numarası yoktur; iki kişi aynı anda kart taşırsa iki ekrandaki sıralama farklı bitebilir (8. gün).
-- İki kişi aynı kartın aynı alanını düzenlerse son kaydeden kazanır; farklı alanlar korunur (8. gün).
+- Olayların sıra numarası yoktur; iki kişi aynı anda kart taşırsa iki ekrandaki sıralama farklı bitebilir (taşıma sürüme bakmaz).
+- Sürüm kart düzeyindedir: farklı alanları düzenleyen iki kişiden ikincisi de çakışma görür (tek tıkla yalnız kendi alanlarını yeniden yollar).
+- Çakışmada kartı kimin değiştirdiği gösterilmez (kimlik doğrulama yok).
+- Kart başka sütuna taşınınca o kartta açık düzenleme formu kapanır, yazılan taslak kaybolur (bileşen yeni sütunda baştan kurulur).
 - Redis pub/sub bir olayı en fazla bir kez iletir; Redis kopukken yayınlanan olay kaybolur (abone geri gelince istemciler yeniden eşitlenir).
 - Redis kesintisi sürerken arayüz “Canlı” görünür ama hiçbir olay almaz (kendi sunucusununkiler de Redis üzerinden gelir).
 - `welcome` mesajındaki `clients` yalnız o sunucuda aynı panoya bağlı istemcileri sayar.
@@ -245,6 +263,6 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 
 ## Sonraki Adımlar (taslak)
 
-- Redis ile arka plan işleri (kuyruk) ve önbellek.
-- Aynı kartın aynı anda değişmesi: sıra numarası ve çakışma çözümü.
 - İstemci tarafı kalp atışı: donmuş sunucuyu fark edip yeniden bağlanmak.
+- Kimlik doğrulama: kartı kimin değiştirdiğini çakışmada göstermek.
+- Taşıma için sıra numarası: aynı anda taşınan kartlarda ekranların aynı sırada bitmesi.

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { assertNever } from "./assert-never.ts";
-import { CardSchema, CardStatusSchema, statusLabel } from "./card.ts";
+import { CardSchema, CardStatusSchema, statusLabel, VersionSchema } from "./card.ts";
 
 export const BoardEventSchema = z.discriminatedUnion("type", [
   z.object({
@@ -18,6 +18,7 @@ export const BoardEventSchema = z.discriminatedUnion("type", [
     cardId: z.number().int().positive(),
     title: z.string(),
     description: z.string().nullable(),
+    version: VersionSchema,
   }),
   z.object({
     type: z.literal("card_deleted"),

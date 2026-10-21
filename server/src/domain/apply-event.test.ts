@@ -17,6 +17,7 @@ function makeCard(id: number, status: CardStatus, position: number): Card {
     description: null,
     status,
     position,
+    version: 1,
     createdAt: "2026-10-16T08:00:00.000Z",
   };
 }
@@ -103,18 +104,61 @@ describe("applyBoardEvent", () => {
     assert.deepEqual(serverResult.find((card) => card.id === 2), { ...start[1], position: 0 });
   });
 
-  it("card_updated yalnız başlığı ve açıklamayı değiştirir", () => {
+  it("card_updated yalnız başlığı, açıklamayı ve sürümü değiştirir", () => {
     const before = structuredClone(start);
     const event: BoardEvent = {
-      type: "card_updated", cardId: 2, title: "Yeni başlık", description: "Açıklama",
+      type: "card_updated",
+      cardId: 2,
+      title: "Yeni başlık",
+      description: "not",
+      version: 2,
     };
-    const once = applyBoardEvent(start, event);
+    const next = applyBoardEvent(start, event);
+    const updated = next.find((card) => card.id === 2);
 
-    assert.deepEqual(once, [start[0], { ...start[1], title: "Yeni başlık", description: "Açıklama" }, start[2]]);
-    assert.deepEqual(applyBoardEvent(once, event), once);
-    assert.deepEqual(applyBoardEvent(once, { ...event, description: null }).find((card) => card.id === 2)?.description, null);
+    assert.deepEqual(updated, {
+      ...start[1],
+      title: "Yeni başlık",
+      description: "not",
+      version: 2,
+    });
+    assert.deepEqual(applyBoardEvent(next, event), next);
+    assert.deepEqual(next.filter((card) => card.id !== 2), [start[0], start[2]]);
+    assert.equal(
+      applyBoardEvent(next, { ...event, description: null, version: 3 })
+        .find((card) => card.id === 2)?.description,
+      null
+    );
     assert.deepEqual(applyBoardEvent(start, { ...event, cardId: 99 }), start);
     assert.deepEqual(start, before);
+  });
+
+  it("eski ya da aynı sürümlü card_updated yeni hali ezmez", () => {
+    const third = applyBoardEvent(start, {
+      type: "card_updated",
+      cardId: 2,
+      title: "Üçüncü sürüm",
+      description: null,
+      version: 3,
+    });
+    const late = applyBoardEvent(third, {
+      type: "card_updated",
+      cardId: 2,
+      title: "İkinci sürüm",
+      description: null,
+      version: 2,
+    });
+    const same = applyBoardEvent(late, {
+      type: "card_updated",
+      cardId: 2,
+      title: "Başka bir üçüncü",
+      description: null,
+      version: 3,
+    });
+    const card = same.find((item) => item.id === 2);
+
+    assert.equal(card?.title, "Üçüncü sürüm");
+    assert.equal(card?.version, 3);
   });
 
   it("geç gelen card_updated kartı eski sütununa geri götürmez", () => {
@@ -129,6 +173,7 @@ describe("applyBoardEvent", () => {
       cardId: 2,
       title: "Yeni başlık",
       description: null,
+      version: 2,
     });
     const card = next.find((item) => item.id === 2);
 

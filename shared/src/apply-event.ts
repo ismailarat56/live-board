@@ -20,8 +20,13 @@ export function applyBoardEvent(cards: readonly Card[], event: BoardEvent): Card
       );
     case "card_updated":
       return cards.map((card) =>
-        card.id === event.cardId
-          ? { ...card, title: event.title, description: event.description }
+        card.id === event.cardId && event.version > card.version
+          ? {
+              ...card,
+              title: event.title,
+              description: event.description,
+              version: event.version,
+            }
           : card
       );
     case "card_deleted":

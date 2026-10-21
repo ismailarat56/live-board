@@ -25,6 +25,7 @@ const cards: Card[] = [
     description: null,
     status: "todo",
     position: 0,
+    version: 1,
     createdAt: new Date().toISOString(),
   },
 ];

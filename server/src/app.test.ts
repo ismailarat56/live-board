@@ -73,6 +73,7 @@ test("POST yeni kartı 201 ile döndürür", async (t) => {
     description: null,
     status: "todo",
     position: 0,
+    version: 1,
   });
   assert.ok(!Number.isNaN(Date.parse(createdAt)));
 });
@@ -120,19 +121,52 @@ test("PATCH /api/cards/:cardId başlığı düzenler, açıklamayı null ile tem
   const api = await startApi(t);
   await api.request("POST", "/api/boards/1/cards", { title: "Bir", description: "eski not" });
 
-  const renamed = await api.request<Card>("PATCH", "/api/cards/1", { title: "  Renk paleti  " });
+  const renamed = await api.request<Card>("PATCH", "/api/cards/1", {
+    title: "  Renk paleti  ",
+    expectedVersion: 1,
+  });
 
   assert.equal(renamed.status, 200);
   assert.ok(renamed.body.success);
   assert.equal(renamed.body.data.title, "Renk paleti");
   assert.equal(renamed.body.data.description, "eski not");
+  assert.equal(renamed.body.data.version, 2);
 
-  const cleared = await api.request<Card>("PATCH", "/api/cards/1", { description: null });
+  const cleared = await api.request<Card>("PATCH", "/api/cards/1", {
+    description: null,
+    expectedVersion: 2,
+  });
 
   assert.ok(cleared.body.success);
   assert.equal(cleared.body.data.title, "Renk paleti");
   assert.equal(cleared.body.data.description, null);
   assert.equal(cleared.body.data.status, "todo");
+  assert.equal(cleared.body.data.version, 3);
+});
+
+test("PATCH eski sürümle 409 VERSION_CONFLICT döner ve kartı değiştirmez", async (t) => {
+  const api = await startApi(t);
+  await api.request("POST", "/api/boards/1/cards", { title: "Ortak kart" });
+  await api.request("PATCH", "/api/cards/1", { title: "A'nın başlığı", expectedVersion: 1 });
+
+  const stale = await api.request<Card>("PATCH", "/api/cards/1", {
+    title: "B'nin başlığı",
+    expectedVersion: 1,
+  });
+
+  assert.equal(stale.status, 409);
+  assert.deepEqual(stale.body, {
+    success: false,
+    error: { code: "VERSION_CONFLICT", message: "Kart bu arada değişti; güncel sürüm 2." },
+  });
+
+  const list = await api.request<Card[]>("GET", "/api/boards/1/cards");
+
+  assert.ok(list.body.success);
+  assert.deepEqual(
+    list.body.data.map((card) => [card.title, card.version]),
+    [["A'nın başlığı", 2]]
+  );
 });
 
 test("DELETE kartı siler, 204 döner ve sütunu yeniden numaralar", async (t) => {
@@ -141,7 +175,7 @@ test("DELETE kartı siler, 204 döner ve sütunu yeniden numaralar", async (t) =
   await api.request("POST", "/api/boards/1/cards", { title: "İki" });
   await api.request("POST", "/api/boards/1/cards", { title: "Üç" });
 
-  const response = await api.send("DELETE", "/api/cards/1");
+  const response = await api.send("DELETE", "/api/cards/1?expectedVersion=1");
 
   assert.equal(response.status, 204);
   assert.equal(await response.text(), "");
@@ -157,9 +191,26 @@ test("DELETE kartı siler, 204 döner ve sütunu yeniden numaralar", async (t) =
     ]
   );
 
-  const again = await api.request("DELETE", "/api/cards/1");
+  const again = await api.request("DELETE", "/api/cards/1?expectedVersion=1");
 
   assert.equal(again.status, 404);
+});
+
+test("DELETE eski sürümle 409 döner ve kartı silmez", async (t) => {
+  const api = await startApi(t);
+  await api.request("POST", "/api/boards/1/cards", { title: "Kalacak" });
+  await api.request("PATCH", "/api/cards/1", { title: "Kalacak (yeni)", expectedVersion: 1 });
+
+  const stale = await api.request("DELETE", "/api/cards/1?expectedVersion=1");
+
+  assert.equal(stale.status, 409);
+  assert.ok(!stale.body.success);
+  assert.equal(stale.body.error.code, "VERSION_CONFLICT");
+
+  const list = await api.request<Card[]>("GET", "/api/boards/1/cards");
+
+  assert.ok(list.body.success);
+  assert.equal(list.body.data.length, 1);
 });
 
 test("hatalı istekler doğru durum ve hata koduyla döner", async (t) => {
@@ -177,13 +228,18 @@ test("hatalı istekler doğru durum ve hata koduyla döner", async (t) => {
     { method: "PATCH", path: "/api/cards/1/move", body: { status: "done", position: 1.5 }, status: 422, code: "INVALID_POSITION" },
     { method: "PATCH", path: "/api/cards/1/move", body: { status: "later", position: 0 }, status: 422, code: "INVALID_STATUS" },
     { method: "PATCH", path: "/api/cards/42/move", body: { status: "done", position: 0 }, status: 404, code: "CARD_NOT_FOUND" },
-    { method: "PATCH", path: "/api/cards/1", body: {}, status: 422, code: "EMPTY_UPDATE" },
-    { method: "PATCH", path: "/api/cards/1", body: { status: "done" }, status: 422, code: "UNKNOWN_FIELD" },
-    { method: "PATCH", path: "/api/cards/1", body: { title: "   " }, status: 422, code: "INVALID_TITLE" },
-    { method: "PATCH", path: "/api/cards/42", body: { title: "Yok" }, status: 404, code: "CARD_NOT_FOUND" },
-    { method: "PATCH", path: "/api/cards/abc", body: { title: "Yok" }, status: 400, code: "INVALID_ID" },
-    { method: "DELETE", path: "/api/cards/42", status: 404, code: "CARD_NOT_FOUND" },
-    { method: "DELETE", path: "/api/cards/0", status: 400, code: "INVALID_ID" },
+    { method: "PATCH", path: "/api/cards/1", body: { expectedVersion: 1 }, status: 422, code: "EMPTY_UPDATE" },
+    { method: "PATCH", path: "/api/cards/1", body: { status: "done", expectedVersion: 1 }, status: 422, code: "UNKNOWN_FIELD" },
+    { method: "PATCH", path: "/api/cards/1", body: { title: "   ", expectedVersion: 1 }, status: 422, code: "INVALID_TITLE" },
+    { method: "PATCH", path: "/api/cards/1", body: { title: "Yeni" }, status: 422, code: "INVALID_VERSION" },
+    { method: "PATCH", path: "/api/cards/1", body: { title: "Yeni", expectedVersion: 0 }, status: 422, code: "INVALID_VERSION" },
+    { method: "PATCH", path: "/api/cards/1", body: { title: "Yeni", expectedVersion: "1" }, status: 422, code: "INVALID_VERSION" },
+    { method: "PATCH", path: "/api/cards/42", body: { title: "Yok", expectedVersion: 1 }, status: 404, code: "CARD_NOT_FOUND" },
+    { method: "PATCH", path: "/api/cards/abc", body: { title: "Yok", expectedVersion: 1 }, status: 400, code: "INVALID_ID" },
+    { method: "DELETE", path: "/api/cards/42?expectedVersion=1", status: 404, code: "CARD_NOT_FOUND" },
+    { method: "DELETE", path: "/api/cards/0?expectedVersion=1", status: 400, code: "INVALID_ID" },
+    { method: "DELETE", path: "/api/cards/1", status: 400, code: "INVALID_VERSION" },
+    { method: "DELETE", path: "/api/cards/1?expectedVersion=abc", status: 400, code: "INVALID_VERSION" },
     { method: "GET", path: "/api/nowhere", status: 404, code: "NOT_FOUND" },
   ];
 

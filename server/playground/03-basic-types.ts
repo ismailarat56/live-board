@@ -17,6 +17,7 @@ const card: Card = {
   description: null,
   status,
   position,
+  version: 1,
   createdAt: new Date().toISOString(),
 };
 

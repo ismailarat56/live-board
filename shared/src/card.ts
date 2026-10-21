@@ -14,6 +14,7 @@ export const CardSchema = z.object({
   description: z.string().nullable(),
   status: CardStatusSchema,
   position: z.number().int().min(0),
+  version: z.number().int().positive(),
   createdAt: z.iso.datetime(),
 });
 
@@ -39,6 +40,14 @@ export const UpdateCardSchema = z.strictObject({
 });
 
 export type UpdateCardInput = z.output<typeof UpdateCardSchema>;
+
+export const VersionSchema = z.number().int().positive();
+
+export const UpdateCardRequestSchema = UpdateCardSchema.extend({
+  expectedVersion: VersionSchema,
+});
+
+export type UpdateCardRequest = z.output<typeof UpdateCardRequestSchema>;
 
 export const MoveCardSchema = z.object({
   status: CardStatusSchema,

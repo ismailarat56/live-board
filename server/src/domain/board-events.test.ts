@@ -14,6 +14,7 @@ const card = {
   description: null,
   status: "todo",
   position: 0,
+  version: 1,
   createdAt: "2026-10-16T08:00:00.000Z",
 };
 
@@ -30,13 +31,26 @@ describe("BoardEventSchema", () => {
     );
     assert.ok(BoardEventSchema.safeParse({ type: "card_deleted", cardId: 7 }).success);
     assert.ok(BoardEventSchema.safeParse({
-      type: "card_updated", cardId: 7, title: "Yeni başlık", description: null,
+      type: "card_updated", cardId: 7, title: "Yeni başlık", description: null, version: 2,
     }).success);
   });
 
   it("card_updated açıklamayı atlayamaz: null ya da metin olmalı", () => {
     assert.equal(
-      BoardEventSchema.safeParse({ type: "card_updated", cardId: 7, title: "Yeni" }).success,
+      BoardEventSchema.safeParse({ type: "card_updated", cardId: 7, title: "Yeni", version: 2 })
+        .success,
+      false
+    );
+  });
+
+  it("card_updated sürümsüz olamaz", () => {
+    assert.equal(
+      BoardEventSchema.safeParse({
+        type: "card_updated",
+        cardId: 7,
+        title: "Yeni",
+        description: null,
+      }).success,
       false
     );
   });
@@ -52,7 +66,7 @@ describe("BoardEventSchema", () => {
       { type: "card_moved", cardId: 7, toStatus: "doing", toPosition: -1 },
       { type: "card_moved", cardId: "7", toStatus: "doing", toPosition: 0 },
       { type: "card_created", card: { ...card, status: "waiting" } },
-      { type: "card_updated", cardId: 7, title: 123, description: null },
+      { type: "card_updated", cardId: 7, title: 123, description: null, version: 2 },
     ];
 
     for (const value of bad) {
@@ -66,7 +80,7 @@ describe("BoardEventSchema", () => {
       "Kart 7 -> Bitti"
     );
     assert.equal(
-      describeEvent({ type: "card_updated", cardId: 7, title: "Yeni başlık", description: null }),
+      describeEvent({ type: "card_updated", cardId: 7, title: "Yeni başlık", description: null, version: 2 }),
       "Kart 7 düzenlendi: Yeni başlık"
     );
   });

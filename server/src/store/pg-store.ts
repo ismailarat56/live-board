@@ -6,7 +6,7 @@ import { diffCards } from "./card-diff.ts";
 import type { CardStore } from "./card-store.ts";
 
 const CARD_COLUMNS =
-  "id, board_id, title, description, status, position, created_at";
+  "id, board_id, title, description, status, position, version, created_at";
 
 const CardRowSchema = z
   .object({
@@ -16,6 +16,7 @@ const CardRowSchema = z
     description: z.string().nullable(),
     status: CardStatusSchema,
     position: z.number(),
+    version: z.number(),
     created_at: z.date(),
   })
   .transform(
@@ -26,6 +27,7 @@ const CardRowSchema = z
       description: row.description,
       status: row.status,
       position: row.position,
+      version: row.version,
       createdAt: row.created_at.toISOString(),
     })
   );
@@ -38,6 +40,15 @@ const BoardRowSchema = z.object({
 const BoardIdRowSchema = z.object({
   board_id: z.number(),
 });
+
+const CardVersionRowSchema = z.object({
+  version: z.number().int().positive(),
+});
+
+type ChangeBoardResult =
+  | { kind: "changed"; boardId: number }
+  | { kind: "not_found" }
+  | { kind: "conflict"; currentVersion: number };
 
 function toCard(row: unknown): Card {
   return CardRowSchema.parse(row);
@@ -62,8 +73,9 @@ export function createPgStore(pool: Pool): CardStore {
 
   async function changeBoard(
     cardId: number,
-    change: (cards: Card[]) => Card[] | null
-  ): Promise<number | null> {
+    change: (cards: Card[]) => Card[] | null,
+    expectedVersion?: number
+  ): Promise<ChangeBoardResult> {
     const client = await pool.connect();
 
     try {
@@ -77,7 +89,7 @@ export function createPgStore(pool: Pool): CardStore {
 
       if (row === undefined) {
         await client.query("ROLLBACK");
-        return null;
+        return { kind: "not_found" };
       }
 
       const boardId = BoardIdRowSchema.parse(row).board_id;
@@ -86,11 +98,23 @@ export function createPgStore(pool: Pool): CardStore {
         [boardId]
       );
       const before = current.rows.map(toCard);
+      const target = before.find((card) => card.id === cardId);
+
+      if (target === undefined) {
+        await client.query("ROLLBACK");
+        return { kind: "not_found" };
+      }
+
+      if (expectedVersion !== undefined && target.version !== expectedVersion) {
+        await client.query("ROLLBACK");
+        return { kind: "conflict", currentVersion: target.version };
+      }
+
       const after = change(before);
 
       if (after === null) {
         await client.query("ROLLBACK");
-        return null;
+        return { kind: "not_found" };
       }
 
       const { removed, changed } = diffCards(before, after);
@@ -108,7 +132,7 @@ export function createPgStore(pool: Pool): CardStore {
 
       await client.query("COMMIT");
 
-      return boardId;
+      return { kind: "changed", boardId };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -150,19 +174,20 @@ export function createPgStore(pool: Pool): CardStore {
     },
 
     async move(cardId, target) {
-      const boardId = await changeBoard(cardId, (cards) =>
+      const result = await changeBoard(cardId, (cards) =>
         moveCard(cards, cardId, target)
       );
 
-      return boardId === null ? null : listCards(boardId);
+      return result.kind === "changed" ? listCards(result.boardId) : null;
     },
 
-    async updateCard(cardId, input) {
+    async updateCard(cardId, input, expectedVersion) {
       const result = await pool.query(
         `UPDATE cards
             SET title = CASE WHEN $2 THEN $3 ELSE title END,
-                description = CASE WHEN $4 THEN $5 ELSE description END
-          WHERE id = $1
+                description = CASE WHEN $4 THEN $5 ELSE description END,
+                version = version + 1
+          WHERE id = $1 AND version = $6
           RETURNING ${CARD_COLUMNS}`,
         [
           cardId,
@@ -170,17 +195,44 @@ export function createPgStore(pool: Pool): CardStore {
           input.title ?? null,
           input.description !== undefined,
           input.description ?? null,
+          expectedVersion,
         ]
       );
+
       const row = result.rows[0];
 
-      return row === undefined ? null : toCard(row);
+      if (row !== undefined) {
+        return { kind: "updated", card: toCard(row) };
+      }
+
+      const current = await pool.query(
+        "SELECT version FROM cards WHERE id = $1",
+        [cardId]
+      );
+      const currentRow = current.rows[0];
+
+      if (currentRow === undefined) {
+        return { kind: "not_found" };
+      }
+
+      return {
+        kind: "conflict",
+        currentVersion: CardVersionRowSchema.parse(currentRow).version,
+      };
     },
 
-    async deleteCard(cardId) {
-      const boardId = await changeBoard(cardId, (cards) => removeCard(cards, cardId));
+    async deleteCard(cardId, expectedVersion) {
+      const result = await changeBoard(
+        cardId,
+        (cards) => removeCard(cards, cardId),
+        expectedVersion
+      );
 
-      return boardId === null ? null : { boardId };
+      if (result.kind !== "changed") {
+        return result;
+      }
+
+      return { kind: "deleted", boardId: result.boardId };
     },
   };
 }

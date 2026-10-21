@@ -10,6 +10,7 @@ function makeCard(id: number, status: CardStatus, position: number): Card {
     description: null,
     status,
     position,
+    version: 1,
     createdAt: "2026-10-09T00:00:00.000Z",
   };
 }

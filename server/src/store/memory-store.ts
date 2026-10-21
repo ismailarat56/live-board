@@ -36,6 +36,7 @@ export function createMemoryStore(): CardStore {
 				id: nextCardId,
 				boardId,
 				position,
+				version: 1,
 				createdAt: new Date().toISOString(),
 			};
 
@@ -58,11 +59,15 @@ export function createMemoryStore(): CardStore {
 			return sortedCards(boardId);
 		},
 
-		async updateCard(cardId, input) {
+		async updateCard(cardId, input, expectedVersion) {
 			const current = cards.find((card) => card.id === cardId);
 
 			if (current === undefined) {
-				return null;
+				return { kind: "not_found" };
+			}
+
+			if (current.version !== expectedVersion) {
+				return { kind: "conflict", currentVersion: current.version };
 			}
 
 			const updated: Card = {
@@ -70,24 +75,34 @@ export function createMemoryStore(): CardStore {
 				title: input.title ?? current.title,
 				description:
 					input.description === undefined ? current.description : input.description,
+				version: current.version + 1,
 			};
 
 			cards = cards.map((card) => (card.id === cardId ? updated : card));
 
-			return updated;
+			return { kind: "updated", card: updated };
 		},
 
-		async deleteCard(cardId) {
-			const boardId = cards.find((card) => card.id === cardId)?.boardId;
+		async deleteCard(cardId, expectedVersion) {
+			const current = cards.find((card) => card.id === cardId);
+
+			if (current === undefined) {
+				return { kind: "not_found" };
+			}
+
+			if (current.version !== expectedVersion) {
+				return { kind: "conflict", currentVersion: current.version };
+			}
+
 			const next = removeCard(cards, cardId);
 
-			if (next === null || boardId === undefined) {
-				return null;
+			if (next === null) {
+				return { kind: "not_found" };
 			}
 
 			cards = next;
 
-			return { boardId };
+			return { kind: "deleted", boardId: current.boardId };
 		},
 	};
 }

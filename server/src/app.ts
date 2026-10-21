@@ -1,7 +1,8 @@
-import { fail, ok } from "@live-board/shared";
+import { assertNever, fail, ok } from "@live-board/shared";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { AppError } from "./http/app-error.ts";
 import {
+  parseExpectedVersion,
   parseId,
   parseMoveCard,
   parseNewCard,
@@ -24,6 +25,18 @@ const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
   console.error(error);
   response.status(500).json(fail("INTERNAL_ERROR", "Beklenmeyen bir hata oluştu."));
 };
+
+function cardNotFound(): AppError {
+  return new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+}
+
+function versionConflict(currentVersion: number): AppError {
+  return new AppError(
+    409,
+    "VERSION_CONFLICT",
+    `Kart bu arada değişti; güncel sürüm ${currentVersion}.`
+  );
+}
 
 export function createApp(store: CardStore, events: EventPublisher = noopHub): Express {
   const app = express();
@@ -67,7 +80,7 @@ export function createApp(store: CardStore, events: EventPublisher = noopHub): E
     const cards = await store.move(cardId, parseMoveCard(request.body));
 
     if (cards === null) {
-      throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+      throw cardNotFound();
     }
 
     const moved = cards.find((card) => card.id === cardId);
@@ -86,33 +99,50 @@ export function createApp(store: CardStore, events: EventPublisher = noopHub): E
 
   app.patch("/api/cards/:cardId", async (request, response) => {
     const cardId = parseId(request.params.cardId, "cardId");
-    const card = await store.updateCard(cardId, parseUpdateCard(request.body));
+    const { expectedVersion, ...input } = parseUpdateCard(request.body);
+    const result = await store.updateCard(cardId, input, expectedVersion);
 
-    if (card === null) {
-      throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+    switch (result.kind) {
+      case "not_found":
+        throw cardNotFound();
+      case "conflict":
+        throw versionConflict(result.currentVersion);
+      case "updated": {
+        const { card } = result;
+
+        events.publish(card.boardId, {
+          type: "card_updated",
+          cardId,
+          title: card.title,
+          description: card.description,
+          version: card.version,
+        });
+
+        response.json(ok(card));
+        return;
+      }
+      default:
+        assertNever(result);
     }
-
-    events.publish(card.boardId, {
-      type: "card_updated",
-      cardId,
-      title: card.title,
-      description: card.description,
-    });
-
-    response.json(ok(card));
   });
 
   app.delete("/api/cards/:cardId", async (request, response) => {
     const cardId = parseId(request.params.cardId, "cardId");
-    const deleted = await store.deleteCard(cardId);
+    const expectedVersion = parseExpectedVersion(request.query.expectedVersion);
+    const result = await store.deleteCard(cardId, expectedVersion);
 
-    if (deleted === null) {
-      throw new AppError(404, "CARD_NOT_FOUND", "Kart bulunamadı.");
+    switch (result.kind) {
+      case "not_found":
+        throw cardNotFound();
+      case "conflict":
+        throw versionConflict(result.currentVersion);
+      case "deleted":
+        events.publish(result.boardId, { type: "card_deleted", cardId });
+        response.status(204).end();
+        return;
+      default:
+        assertNever(result);
     }
-
-    events.publish(deleted.boardId, { type: "card_deleted", cardId });
-
-    response.status(204).end();
   });
 
   app.use((_request, response) => {

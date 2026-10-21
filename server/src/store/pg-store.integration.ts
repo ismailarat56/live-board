@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { readDatabaseUrl } from "../config.ts";
 import { createPool } from "../db/pool.ts";
 import { createPgStore } from "./pg-store.ts";
+import { versionContract } from "./version-contract.ts";
 
 const pool = createPool(readDatabaseUrl());
 const store = createPgStore(pool);
@@ -52,6 +53,7 @@ test("kartı veritabanına yazar ve sütunun sonuna koyar", async () => {
   assert.equal(first.position, 0);
   assert.equal(second.position, 1);
   assert.equal(second.boardId, boardId);
+  assert.equal(second.version, 1);
   assert.equal(typeof second.createdAt, "string");
   assert.equal(await countCards(), 2);
 });
@@ -88,14 +90,14 @@ test("düzenleme gönderilmeyen alana dokunmaz, null açıklamayı temizler", as
     status: "doing",
   });
 
-  const renamed = await store.updateCard(card.id, { title: "Üç (yeni)" });
-  const cleared = await store.updateCard(card.id, { description: null });
+  const renamed = await store.updateCard(card.id, { title: "Üç (yeni)" }, 1);
+  const cleared = await store.updateCard(card.id, { description: null }, 2);
 
-  assert.equal(renamed?.description, "ilk not");
-  assert.equal(cleared?.title, "Üç (yeni)");
-  assert.equal(cleared?.description, null);
-  assert.equal(cleared?.status, "doing");
-  assert.equal(await store.updateCard(999_999, { title: "Yok" }), null);
+  assert.ok(renamed.kind === "updated" && cleared.kind === "updated");
+  assert.equal(renamed.card.description, "ilk not");
+  assert.equal(cleared.card.title, "Üç (yeni)");
+  assert.equal(cleared.card.description, null);
+  assert.equal(cleared.card.status, "doing");
 });
 
 test("silme kartı kaldırır, arkasındakileri kaydırır; yeni kart sona gelir", async () => {
@@ -105,8 +107,10 @@ test("silme kartı kaldırır, arkasındakileri kaydırır; yeni kart sona gelir
   await store.createCard(boardId, { title: "Dört", description: null, status: "todo" });
   await store.createCard(boardId, { title: "Beş", description: null, status: "todo" });
 
-  assert.deepEqual(await store.deleteCard(first.id), { boardId });
-  assert.equal(await store.deleteCard(first.id), null);
+  assert.deepEqual(await store.deleteCard(first.id, first.version), {
+    kind: "deleted",
+    boardId,
+  });
 
   const added = await store.createCard(boardId, {
     title: "Altı",
@@ -135,4 +139,24 @@ test("veritabanındaki CHECK kuralı TypeScript'in geçirdiği değeri durdurur"
     store.createCard(boardId, { title: tooLong, description: null, status: "todo" }),
     { code: "23514" }
   );
+});
+
+versionContract(() => ({ store, boardId }));
+
+test("aynı sürümle gelen iki eşzamanlı düzenlemeden yalnız biri kazanır", async () => {
+  for (let round = 1; round <= 20; round += 1) {
+    const card = await store.createCard(boardId, {
+      title: `Yarış ${round}`,
+      description: null,
+      status: "done",
+    });
+
+    const results = await Promise.all([
+      store.updateCard(card.id, { title: "A kazandı" }, 1),
+      store.updateCard(card.id, { title: "B kazandı" }, 1),
+    ]);
+    const kinds = results.map((result) => result.kind).toSorted();
+
+    assert.deepEqual(kinds, ["conflict", "updated"], `${round}. tur`);
+  }
 });

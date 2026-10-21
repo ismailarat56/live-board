@@ -1,10 +1,10 @@
 import {
   MoveCardSchema,
   NewCardSchema,
-  UpdateCardSchema,
+  UpdateCardRequestSchema,
   type MoveCardInput,
   type NewCardInput,
-  type UpdateCardInput,
+  type UpdateCardRequest,
 } from "@live-board/shared";
 import type { z } from "zod";
 import { AppError } from "./app-error.ts";
@@ -19,6 +19,7 @@ const FIELD_ERRORS: Record<string, FieldError> = {
   description: { code: "INVALID_DESCRIPTION", message: "Açıklama metin olmalı." },
   status: { code: "INVALID_STATUS", message: "Durum todo, doing veya done olmalı." },
   position: { code: "INVALID_POSITION", message: "Pozisyon bir tam sayı olmalı." },
+  expectedVersion: { code: "INVALID_VERSION", message: "expectedVersion pozitif bir tam sayı olmalı." },
 };
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -62,12 +63,22 @@ export function parseMoveCard(body: unknown): MoveCardInput {
   return parseBody(MoveCardSchema, body);
 }
 
-export function parseUpdateCard(body: unknown): UpdateCardInput {
-  const input = parseBody(UpdateCardSchema, body);
+export function parseUpdateCard(body: unknown): UpdateCardRequest {
+  const input = parseBody(UpdateCardRequestSchema, body);
 
   if (input.title === undefined && input.description === undefined) {
     throw new AppError(422, "EMPTY_UPDATE", "En az bir alan gönderilmeli: title ya da description.");
   }
 
   return input;
+}
+
+export function parseExpectedVersion(raw: unknown): number {
+  const version = typeof raw === "string" ? Number(raw) : Number.NaN;
+
+  if (!Number.isSafeInteger(version) || version <= 0) {
+    throw new AppError(400, "INVALID_VERSION", "expectedVersion pozitif bir tam sayı olmalı.");
+  }
+
+  return version;
 }

@@ -213,3 +213,50 @@ button:disabled {
 .conflict p {
   margin: 0;
 }
+
+.name-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+}
+
+.name-form input {
+  font: inherit;
+  width: 12ch;
+  padding: 4px 6px;
+}
+
+.members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.members h2 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.members ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #ddf4ff;
+  font-size: 0.8125rem;
+}
+
+.member-me {
+  background: #1f6feb;
+  color: #fff;
+}

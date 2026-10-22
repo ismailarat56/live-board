@@ -13,7 +13,8 @@ export type SocketState =
 
 interface UseBoardSocketOptions {
   boardId: number;
-  onWelcome: () => void;
+  name: string;
+  onWelcome: (connectionId: string) => void;
   onEvent: (event: BoardEvent) => void;
 }
 
@@ -24,6 +25,7 @@ interface BoardSocket {
 
 export function useBoardSocket({
   boardId,
+  name,
   onWelcome,
   onEvent,
 }: UseBoardSocketOptions): BoardSocket {
@@ -43,7 +45,8 @@ export function useBoardSocket({
       setState({ status: "connecting" });
 
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      const current = new WebSocket(`${protocol}//${location.host}/ws?boardId=${boardId}`);
+      const query = new URLSearchParams({ boardId: String(boardId), name });
+      const current = new WebSocket(`${protocol}//${location.host}/ws?${query}`);
       socket = current;
 
       current.addEventListener("open", () => {
@@ -77,7 +80,7 @@ export function useBoardSocket({
         switch (message.type) {
           case "welcome":
             failures = 0;
-            handleWelcome();
+            handleWelcome(message.connectionId);
             break;
           case "event":
             handleEvent(message.event);
@@ -120,7 +123,7 @@ export function useBoardSocket({
       socket?.close();
       window.removeEventListener("online", handleOnline);
     };
-  }, [boardId, connection]);
+  }, [boardId, name, connection]);
 
   return { state, reconnectNow: () => setConnection((value) => value + 1) };
 }

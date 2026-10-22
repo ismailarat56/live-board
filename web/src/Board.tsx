@@ -3,12 +3,15 @@ import { useEffect, useReducer, useState } from "react";
 import { deleteCard, errorMessage, isVersionConflict, listCards, moveCard } from "./api.ts";
 import { boardReducer, cardsInColumn, initialBoardState } from "./board-state.ts";
 import { Column } from "./Column.tsx";
+import { MemberList } from "./MemberList.tsx";
 import { moveTarget, type Direction } from "./move-target.ts";
 import { NewCardForm } from "./NewCardForm.tsx";
 import { useBoardSocket, type SocketState } from "./use-board-socket.ts";
+import { useMembers } from "./use-members.ts";
 
 interface BoardProps {
   boardId: number;
+  name: string;
 }
 
 function socketText(state: SocketState): string {
@@ -24,16 +27,30 @@ function socketText(state: SocketState): string {
   }
 }
 
-export function Board({ boardId }: BoardProps) {
+export function Board({ boardId, name }: BoardProps) {
   const [state, dispatch] = useReducer(boardReducer, initialBoardState);
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [me, setMe] = useState<string | null>(null);
+  const members = useMembers(boardId);
   const refresh = () => setAttempt((value) => value + 1);
   const socket = useBoardSocket({
     boardId,
-    onWelcome: refresh,
-    onEvent: (event) => dispatch({ type: "eventReceived", event }),
+    name,
+    onWelcome: (connectionId) => {
+      setMe(connectionId);
+      refresh();
+      members.refresh();
+    },
+    onEvent: (event) => {
+      if (event.type === "members_changed") {
+        members.refresh();
+        return;
+      }
+
+      dispatch({ type: "eventReceived", event });
+    },
   });
 
   useEffect(() => {
@@ -132,7 +149,9 @@ export function Board({ boardId }: BoardProps) {
     case "ready":
       return (
         <>
+          {/* Fragment, fazladan bir DOM elemanı oluşturmadan içeriği gruplar. */}
           {badge}
+          {socket.state.status === "open" && <MemberList members={members.members} me={me} />}
           <NewCardForm
             boardId={boardId}
             onCreated={(card) => dispatch({ type: "cardCreated", card })}

@@ -1,7 +1,9 @@
 import {
   apiResponseSchema,
   CardSchema,
+  MembersSchema,
   type Card,
+  type Member,
   type MoveCardInput,
   type NewCardInput,
   type UpdateCardInput,
@@ -114,4 +116,8 @@ export function deleteCard(cardId: number, expectedVersion: number): Promise<voi
   return request(`/api/cards/${cardId}?expectedVersion=${expectedVersion}`, z.void(), {
     method: "DELETE",
   });
+}
+
+export function listMembers(boardId: number): Promise<Member[]> {
+  return request(`/api/boards/${boardId}/members`, MembersSchema);
 }

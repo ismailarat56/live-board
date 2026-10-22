@@ -11,7 +11,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("welcome"),
     boardId: z.number().int().positive(),
-    clients: z.number().int().positive(),
+    connectionId: z.string().min(1),
   }),
   z.object({ type: z.literal("event"), event: BoardEventSchema }),
   z.object({ type: z.literal("pong") }),

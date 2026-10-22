@@ -1,18 +1,30 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import {
   assertNever,
   ClientMessageSchema,
+  MemberNameSchema,
+  type Member,
   type ServerMessage,
 } from "@live-board/shared";
 import { WebSocket, WebSocketServer } from "ws";
-import type { BoardHub } from "./hub.ts";
+import type { BoardHub, EventPublisher } from "./hub.ts";
+import { PRESENCE_REFRESH_MS, type PresenceStore } from "./presence.ts";
 
 const DEFAULT_HEARTBEAT_MS = 30_000;
 
 export interface WebSocketOptions {
   boardExists(boardId: number): Promise<boolean>;
+  presence: PresenceStore;
+  events: EventPublisher;
   heartbeatMs?: number;
+  presenceRefreshMs?: number;
+}
+
+interface ConnectionRequest {
+  boardId: number;
+  name: string;
 }
 
 function reject(socket: Duplex, status: string): void {
@@ -20,7 +32,9 @@ function reject(socket: Duplex, status: string): void {
   socket.destroy();
 }
 
-function readBoardId(request: IncomingMessage): number | "not-found" | "bad-request" {
+function readConnection(
+  request: IncomingMessage
+): ConnectionRequest | "not-found" | "bad-request" {
   const url = new URL(request.url ?? "/", "http://localhost");
 
   if (url.pathname !== "/ws") {
@@ -33,7 +47,13 @@ function readBoardId(request: IncomingMessage): number | "not-found" | "bad-requ
     return "bad-request";
   }
 
-  return boardId;
+  const name = MemberNameSchema.safeParse(url.searchParams.get("name"));
+
+  if (!name.success) {
+    return "bad-request";
+  }
+
+  return { boardId, name: name.data };
 }
 
 function sendMessage(socket: WebSocket, message: ServerMessage): void {
@@ -44,7 +64,7 @@ function sendMessage(socket: WebSocket, message: ServerMessage): void {
 
 export interface WebSocketHandle {
   resync(): void;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export function attachWebSocket(
@@ -54,6 +74,15 @@ export function attachWebSocket(
 ): WebSocketHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });
   const alive = new WeakSet<WebSocket>();
+  const members = new Map<WebSocket, { boardId: number; member: Member }>();
+
+  function announce(boardId: number, change: Promise<void>): Promise<void> {
+    return change
+      .then(() => options.events.publish(boardId, { type: "members_changed" }))
+      .catch((error: unknown) => {
+        console.error("Üye listesi güncellenemedi:", String(error));
+      });
+  }
 
   const heartbeat = setInterval(() => {
     for (const client of wss.clients) {
@@ -68,23 +97,36 @@ export function attachWebSocket(
   }, options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
   heartbeat.unref();
-  server.on("close", () => clearInterval(heartbeat));
+
+  const refresh = setInterval(() => {
+    for (const { boardId, member } of members.values()) {
+      options.presence.upsert(boardId, member).catch((error: unknown) => {
+        console.error("Üye tazelenemedi:", String(error));
+      });
+    }
+  }, options.presenceRefreshMs ?? PRESENCE_REFRESH_MS);
+
+  refresh.unref();
+  server.on("close", () => {
+    clearInterval(heartbeat);
+    clearInterval(refresh);
+  });
 
   server.on("upgrade", (request, socket, head) => {
-    const boardId = readBoardId(request);
+    const connection = readConnection(request);
 
-    if (boardId === "not-found") {
+    if (connection === "not-found") {
       reject(socket, "404 Not Found");
       return;
     }
 
-    if (boardId === "bad-request") {
+    if (connection === "bad-request") {
       reject(socket, "400 Bad Request");
       return;
     }
 
     options
-      .boardExists(boardId)
+      .boardExists(connection.boardId)
       .then((exists) => {
         if (!exists) {
           reject(socket, "404 Not Found");
@@ -92,7 +134,7 @@ export function attachWebSocket(
         }
 
         wss.handleUpgrade(request, socket, head, (ws) => {
-          handleConnection(ws, boardId);
+          handleConnection(ws, connection);
         });
       })
       .catch((error: unknown) => {
@@ -101,7 +143,7 @@ export function attachWebSocket(
       });
   });
 
-  function handleConnection(ws: WebSocket, boardId: number): void {
+  function handleConnection(ws: WebSocket, { boardId, name }: ConnectionRequest): void {
     alive.add(ws);
     ws.on("pong", () => alive.add(ws));
 
@@ -113,7 +155,11 @@ export function attachWebSocket(
       },
     });
 
-    sendMessage(ws, { type: "welcome", boardId, clients: hub.count(boardId) });
+    const member: Member = { connectionId: randomUUID(), name };
+
+    members.set(ws, { boardId, member });
+    announce(boardId, options.presence.upsert(boardId, member));
+    sendMessage(ws, { type: "welcome", boardId, connectionId: member.connectionId });
 
     ws.on("message", (data, isBinary) => {
       if (isBinary) {
@@ -158,7 +204,13 @@ export function attachWebSocket(
       }
     });
 
-    ws.on("close", unsubscribe);
+    ws.on("close", () => {
+      unsubscribe();
+
+      if (members.delete(ws)) {
+        announce(boardId, options.presence.remove(boardId, member.connectionId));
+      }
+    });
     ws.on("error", (error) => {
       console.error("WebSocket hatası:", error.message);
     });
@@ -171,12 +223,21 @@ export function attachWebSocket(
       }
     },
 
-    close() {
+    async close() {
       clearInterval(heartbeat);
+      clearInterval(refresh);
+
+      const leaving = [...members.values()].map(({ boardId, member }) =>
+        announce(boardId, options.presence.remove(boardId, member.connectionId))
+      );
+
+      members.clear();
 
       for (const client of wss.clients) {
         client.close(1001, "Sunucu kapanıyor");
       }
+
+      await Promise.all(leaving);
     },
   };
 }

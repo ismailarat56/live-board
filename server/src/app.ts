@@ -9,6 +9,8 @@ import {
   parseUpdateCard,
 } from "./http/validate.ts";
 import { noopHub, type EventPublisher } from "./realtime/hub.ts";
+import { createMemoryPresence } from "./realtime/memory-presence.ts";
+import { PRESENCE_TTL_MS, type PresenceStore } from "./realtime/presence.ts";
 import type { CardStore } from "./store/card-store.ts";
 
 const handleError: ErrorRequestHandler = (error, _request, response, _next) => {
@@ -38,7 +40,11 @@ function versionConflict(currentVersion: number): AppError {
   );
 }
 
-export function createApp(store: CardStore, events: EventPublisher = noopHub): Express {
+export function createApp(
+  store: CardStore,
+  events: EventPublisher = noopHub,
+  presence: PresenceStore = createMemoryPresence(PRESENCE_TTL_MS)
+): Express {
   const app = express();
 
   app.use(express.json({ limit: "20kb" }));
@@ -62,6 +68,13 @@ export function createApp(store: CardStore, events: EventPublisher = noopHub): E
     const cards = await store.listCards(boardId);
 
     response.json(ok(cards));
+  });
+
+  app.get("/api/boards/:boardId/members", async (request, response) => {
+    const boardId = parseId(request.params.boardId, "boardId");
+    await requireBoard(boardId);
+
+    response.json(ok(await presence.list(boardId)));
   });
 
   app.post("/api/boards/:boardId/cards", async (request, response) => {

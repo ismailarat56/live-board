@@ -24,6 +24,7 @@ export const BoardEventSchema = z.discriminatedUnion("type", [
     type: z.literal("card_deleted"),
     cardId: z.number().int().positive(),
   }),
+  z.object({ type: z.literal("members_changed") }),
 ]);
 
 export type BoardEvent = z.infer<typeof BoardEventSchema>;
@@ -38,6 +39,8 @@ export function describeEvent(event: BoardEvent): string {
       return `Kart ${event.cardId} düzenlendi: ${event.title}`;
     case "card_deleted":
       return `Kart ${event.cardId} silindi`;
+    case "members_changed":
+      return "Panodakiler değişti";
     default:
       return assertNever(event);
   }

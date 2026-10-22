@@ -3,7 +3,10 @@ import { createApp } from "./app.ts";
 import { config } from "./config.ts";
 import { createPool } from "./db/pool.ts";
 import { createHub, type BoardHub, type EventPublisher } from "./realtime/hub.ts";
+import { createMemoryPresence } from "./realtime/memory-presence.ts";
+import { PRESENCE_TTL_MS, type PresenceStore } from "./realtime/presence.ts";
 import { connectRedis } from "./realtime/redis.ts";
+import { createRedisPresence } from "./realtime/redis-presence.ts";
 import { createRedisRelay } from "./realtime/redis-relay.ts";
 import { attachWebSocket } from "./realtime/ws-server.ts";
 import type { CardStore } from "./store/card-store.ts";
@@ -31,6 +34,7 @@ function createStore(): StoreHandle {
 
 interface PubSubHandle {
   events: EventPublisher;
+  presence: PresenceStore;
   onReconnect(listener: () => void): void;
   close(): Promise<void>;
 }
@@ -38,7 +42,12 @@ interface PubSubHandle {
 async function createPubSub(hub: BoardHub): Promise<PubSubHandle> {
   switch (config.pubsub.kind) {
     case "local":
-      return { events: hub, onReconnect: () => {}, close: async () => {} };
+      return {
+        events: hub,
+        presence: createMemoryPresence(PRESENCE_TTL_MS),
+        onReconnect: () => {},
+        close: async () => {},
+      };
     case "redis": {
       const redis = await connectRedis(config.pubsub.redisUrl);
       const relay = createRedisRelay(redis.publisher, redis.subscriber, hub);
@@ -47,6 +56,7 @@ async function createPubSub(hub: BoardHub): Promise<PubSubHandle> {
 
       return {
         events: relay,
+        presence: createRedisPresence(redis.publisher, PRESENCE_TTL_MS),
         onReconnect: (listener) => {
           redis.subscriber.on("ready", listener);
         },
@@ -61,7 +71,7 @@ async function createPubSub(hub: BoardHub): Promise<PubSubHandle> {
 const { store, close: closeStore } = createStore();
 const hub = createHub();
 const pubsub = await createPubSub(hub);
-const app = createApp(store, pubsub.events);
+const app = createApp(store, pubsub.events, pubsub.presence);
 
 const server = app.listen(config.port, (error) => {
   if (error) {
@@ -75,6 +85,8 @@ const server = app.listen(config.port, (error) => {
 
 const sockets = attachWebSocket(server, hub, {
   boardExists: async (boardId) => (await store.findBoard(boardId)) !== null,
+  presence: pubsub.presence,
+  events: pubsub.events,
 });
 
 pubsub.onReconnect(() => {
@@ -97,9 +109,10 @@ function shutdown(signal: NodeJS.Signals): void {
     process.exit(1);
   }, 5_000).unref();
 
-  sockets.close();
+  const leaving = sockets.close();
   server.close(() => {
-    Promise.all([closeStore(), pubsub.close()])
+    leaving
+      .then(() => Promise.all([closeStore(), pubsub.close()]))
       .then(() => {
         console.log("Sunucu kapandı.");
         process.exit(0);

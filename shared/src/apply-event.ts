@@ -31,6 +31,8 @@ export function applyBoardEvent(cards: readonly Card[], event: BoardEvent): Card
       );
     case "card_deleted":
       return removeCard(cards, event.cardId) ?? [...cards];
+    case "members_changed":
+      return [...cards];
     default:
       return assertNever(event);
   }

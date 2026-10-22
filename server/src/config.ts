@@ -34,6 +34,16 @@ export function readDatabaseUrl(): string {
   return url;
 }
 
+export function readRedisUrl(): string {
+  const url = process.env.REDIS_URL;
+
+  if (url === undefined || url === "") {
+    throw new Error("REDIS_URL tanımlı değil; server/.env dosyasına bak.");
+  }
+
+  return url;
+}
+
 function readStore(): StoreConfig {
   const kind = process.env.STORE ?? "memory";
 
@@ -56,13 +66,7 @@ function readPubSub(): PubSubConfig {
   }
 
   if (kind === "redis") {
-    const redisUrl = process.env.REDIS_URL;
-
-    if (redisUrl === undefined || redisUrl === "") {
-      throw new Error("PUBSUB=redis için REDIS_URL tanımlı olmalı; server/.env dosyasına bak.");
-    }
-
-    return { kind, redisUrl };
+    return { kind, redisUrl: readRedisUrl() };
   }
 
   throw new Error("PUBSUB local veya redis olmalıdır.");

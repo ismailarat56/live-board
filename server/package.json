@@ -10,7 +10,8 @@
     "test": "node --test \"src/**/*.test.ts\"",
     "db:ping": "node --env-file=.env src/db/ping.ts",
     "db:migrate": "node --env-file=.env src/db/migrate.ts",
-    "test:db": "node --env-file=.env --test src/store/pg-store.integration.ts"
+    "test:db": "node --env-file=.env --test src/store/pg-store.integration.ts",
+    "test:redis": "node --env-file=.env --test src/realtime/redis-presence.integration.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

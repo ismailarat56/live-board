@@ -18,6 +18,9 @@ Kart tablosuna sürüm alanı eklenirken mevcut kayıtların da geçerli bir ba�
 
 ## Kendi Yazdığım Sürüm Kontrolü
 
+22 Ekim 2026'da yaptığım doğrulama deneyinde, `updateCard` içindeki `+ 1` ifadesini kaldırdığım ilk çalıştırmada `sürüm: doğru sürümle düzenleme kartı günceller ve sürümü bir artırır` testi kırmızı kaldı; beklenen sürüm 2 iken kartın sürümü 1 olarak kaldı (20 Ekim'deki ilk denemenin sonucu bu notta kayıtlı değildi).
+Sürüm artmayınca eski sürümle düzenleme ve silme hâlâ geçerli sayıldı, sürüm 2 ile gelen ardışık ve farklı alan düzenlemeleri ise reddedildi; toplam beş test kırıldı ve `+ 1` ifadesini geri koyunca on testin tamamı geçti.
+
 ## Önce Oku Sonra Yaz Neden Yetmez
 
 Sürümü önce okuyup sonra ayrı bir komutla yazarsam iki istek de ilk okumada aynı sürümü görüp devam edebilir. Sürüm karşılaştırmasını güncelleme komutunun koşuluna taşımak, kontrolü yazma işleminin parçası yapıyor. PostgreSQL yarış testi aynı sürümle iki güncellemeyi birlikte başlatarak yalnız birinin kazanmasını denetliyor.

@@ -8,11 +8,11 @@ Proje TypeScript ile, testleri ilk günden yazılarak geliştiriliyor.
 
 - `package.json`: `shared`, `server` ve `web` paketlerini birleştiren npm workspaces tanımı.
 - `shared/`: Sunucu ve arayüzün ortak paketi (`@live-board/shared`).
-- `shared/src/`: Kart, API yanıtı, pano olayı ve WebSocket mesajı için zod şemaları ve tipleri; `moveCard`, `removeCard` ve `applyBoardEvent`.
+- `shared/src/`: Kart, üye, API yanıtı, pano olayı ve WebSocket mesajı için zod şemaları ve tipleri; `moveCard`, `removeCard` ve `applyBoardEvent`.
 - `server/`: Node.js + Express API (TypeScript).
 - `server/src/domain/`: Pano tanımı, taşıma ve olay testleri; `moveCard` artık `shared` paketinde.
 - `server/src/http/`: Hata sınıfı ve gelen verinin zod ile doğrulanması.
-- `server/src/realtime/`: Hub (aboneler), WebSocket sunucusu (`ws`), Redis bağlantıları ve köprüsü (`redis-relay`).
+- `server/src/realtime/`: Hub (aboneler), WebSocket sunucusu (`ws`), Redis bağlantıları ve köprüsü (`redis-relay`); üye listesi için bellekte ve Redis'te iki depo, iki depoda koşan sözleşme (`presence-contract`).
 - `server/src/store/`: `CardStore` arayüzü; bellekte ve PostgreSQL'de iki depo; iki depoda koşan sürüm sözleşmesi (`version-contract`); `diffCards`.
 - `server/src/db/`: Bağlantı havuzu, bağlantı kontrolü ve migration çalıştırıcısı.
 - `server/migrations/`: Sıra numaralı SQL dosyaları.
@@ -74,6 +74,7 @@ Sunucu paketinde (`server/` klasöründe veya kökten komuta `-w @live-board/ser
 | Komut | Açıklama |
 | --- | --- |
 | `npm run test:db` | PostgreSQL deposunu test eder; veritabanı açık olmalı. |
+| `npm run test:redis` | Redis üye deposunu test eder; Redis açık olmalı, 1 numaralı veritabanını kullanır. |
 | `npm run db:migrate` | Uygulanmamış migration'ları sırayla çalıştırır. |
 | `npm run db:ping` | Veritabanına bağlanıp sürümünü yazar. |
 
@@ -130,10 +131,13 @@ Kök klasörde:
 npm run typecheck
 npm test
 npm run test:db -w @live-board/server
+npm run test:redis -w @live-board/server
+npm run build -w @live-board/web
 ```
 
 - `npm test`: Sunucunun iş kuralı, HTTP ve WebSocket testleri ile web tarafındaki `boardReducer`, `cardsInColumn`, `moveTarget` ve yeniden bağlanma süresi kontrollerini çalıştırır. Sunucu ve web için ayrı test özetleri gösterilir; veritabanı gerektirmez.
 - `npm run test:db`: PostgreSQL deposunda pano okuma, kart oluşturma, taşımanın kalıcılığı, kısmi düzenleme, silme sonrası sıralama, bulunamayan kart ve SQL `CHECK` kısıtı. PostgreSQL'in açık, `.env` dosyasının ayarlı ve migration'ın uygulanmış olması gerekir. Testler kendi panosunu oluşturup sonunda siler.
+- `npm run test:redis`: Üye deposunun ortak sözleşmesini gerçek Redis'te çalıştırır; Redis açık ve `server/.env` içindeki `REDIS_URL` ayarlı olmalıdır. Testler 1 numaralı veritabanındaki `presence:board:1` ve `presence:board:2` anahtarlarını her test öncesinde temizler; bu veritabanını testlere ayır.
 
 ## Depolar
 
@@ -149,6 +153,7 @@ Kart sorgularından dönen satırlar `CardRowSchema` ile çalışma anında doğ
 | --- | --- | --- |
 | GET | `/health` | Sunucunun sağlık durumu. |
 | GET | `/api/boards/:boardId/cards` | Panodaki kartlar, sütun ve pozisyon sırasıyla. |
+| GET | `/api/boards/:boardId/members` | Panodaki bağlantılar: `[{ connectionId, name }]`, ada göre sıralı. |
 | POST | `/api/boards/:boardId/cards` | `{ title, description?, status? }` ile kart oluşturur; `201` döner. |
 | PATCH | `/api/cards/:cardId/move` | `{ status, position }` ile kartı taşır; panonun bütün kartlarını döner. |
 | PATCH | `/api/cards/:cardId` | `{ title?, description?, expectedVersion }` ile kartı düzenler ve kartı döner; en az bir içerik alanı gerekir, bilinmeyen alan `422` döndürür. |
@@ -162,11 +167,11 @@ JSON yanıtları `{ success: true, data }` veya `{ success: false, error: { code
 
 ## Canlı Güncelleme (WebSocket)
 
-Bağlantı adresi: `ws://localhost:4000/ws?boardId=1`. El sıkışmada yol `/ws`, `boardId` pozitif bir tam sayı ve pano mevcut olmalıdır; geçersiz `boardId` için `400`, yanlış yol veya bulunamayan pano için `404` döner.
+Bağlantı adresi: `ws://localhost:4000/ws?boardId=1&name=Ali`. El sıkışmada yol `/ws`, `boardId` pozitif bir tam sayı ve pano mevcut olmalıdır. Adın başındaki ve sonundaki boşluklar kırpılır; kalan ad 1–30 karakter olmalıdır. Geçersiz `boardId` veya ad için `400`, yanlış yol veya bulunamayan pano için `404` döner.
 
 ```text
-sunucu --> istemci   { type: "welcome", boardId, clients }
-                    { type: "event", event: BoardEvent }     card_created | card_moved | card_updated | card_deleted
+sunucu --> istemci   { type: "welcome", boardId, connectionId }
+                    { type: "event", event: BoardEvent }     card_created | card_moved | card_updated | card_deleted | members_changed
                     { type: "pong" }
                     { type: "error", code, message }         INVALID_JSON | INVALID_MESSAGE | BINARY_NOT_SUPPORTED
 istemci --> sunucu   { type: "ping" }
@@ -212,15 +217,33 @@ Redis --> her sunucunun abone bağlantısı (PSUBSCRIBE board:*) --> JSON + Boar
 - Redis'ten gelen mesaj dışarıdan gelen veridir: JSON'a ve `BoardEventSchema`'ya uymayan mesaj kaydedilip atılır.
 - Redis koparsa HTTP yazmaları sürer, olaylar kaybolur (“Redis'e yayınlanamadı”). Abone bağlantısı geri gelince her sunucu soketlerini `1012` “Yeniden eşitleme” ile kapatır; arayüz yeniden bağlanır ve panoyu baştan çeker.
 - Redis kapalıyken sunucu açılmaz: bağlanana kadar yaklaşık 2 saniyede bir yeniden dener.
-- Redis'te kalıcılık kapalıdır (`--save ""`, `--appendonly no`): yeniden başlayınca içi boştur. Bugün Redis yalnız mesaj taşıyor, veri saklamıyor.
+- Redis'te kalıcılık kapalıdır (`--save ""`, `--appendonly no`): yeniden başlayınca içi boştur. Redis olayları taşır ve süreli üye kayıtlarını tutar; kartlar PostgreSQL'de kalır. Aktif bağlantıların üyelikleri tazeleme ve yeniden eşitlemeyle tekrar oluşur.
+
+## Panodakiler (Üye Listesi)
+
+| Kavram | Anlamı |
+| --- | --- |
+| Üye | Bir WebSocket bağlantısı: `{ connectionId, name }`; aynı kişinin iki sekmesi iki üyedir. |
+| `presence:board:<id>` | Redis hash'i; alan `connectionId`, değer ad, her alanın kendi süresi 15 saniyedir. |
+| Tazeleme | Her sunucu 5 saniyede bir kendi bağlantılarının süresini `HSETEX` ile baştan başlatır. |
+| `members_changed` | Katılma ve ayrılmada yayınlanan olay; arayüz listeyi `GET /api/boards/:boardId/members` ile yeniden çeker. |
+
+- Sunucu düzgün kapanırsa (`SIGTERM`, `SIGINT`) kendi üyelerini siler ve değişikliği duyurur; liste diğer sekmelerde hemen güncellenir.
+- Sunucu çökerse (`kill -KILL`) ayrılışı duyuramaz. Tazelenmeyen kayıtlar en geç 15 saniyede Redis'ten kendiliğinden düşer; süre dolması bir olay üretmez. Bu yüzden arayüz listeyi 5 saniyede bir yeniden sorar ve düşen üye normal koşullarda en geç yaklaşık 20 saniyede ekrandan gider.
+- Tazeleme `HSETEX ... PX` ile yapılır. Düz `HSET`, alanın süresini siler; kayıt artık kendiliğinden düşmez.
+- Ad el sıkışmada `MemberNameSchema` ile doğrulanır. Arayüz adı tarayıcıda (`localStorage`) saklar, ilk açılışta “Misafir NNN” verir; ad değişince bağlantı yeni adla yeniden kurulur.
+- Bağlantı koptuğunda arayüz üye listesini gizler: kopuk sekmenin elindeki liste eskidir.
+- Üye deposu sözleşmesi (`server/src/realtime/presence-contract.ts`) iki depoda koşar: `npm test` bellekte, `test:redis` Redis'te.
+- `PUBSUB=local` ile üye listesi de bellekte tutulur; bu düzen tek sunucu içindir.
 
 ## Doğrulama
 
-Veri dört yerde çalışma anında doğrulanır; aşağıdaki tablo bu dört yeri ve hata sonuçlarını gösterir.
+Veri beş yerde çalışma anında doğrulanır; aşağıdaki tablo bu beş yeri ve hata sonuçlarını gösterir.
 
 | Veri girişi | Dosya | Şema ve hata sonucu |
 | --- | --- | --- |
 | İstek gövdesi | `server/src/http/validate.ts` | `NewCardSchema`, `MoveCardSchema`, `UpdateCardRequestSchema` → `400` / `422`. |
+| Bağlantı adresi | `server/src/realtime/ws-server.ts` | `boardId`, `MemberNameSchema` → `400`. |
 | Veritabanı satırı | `server/src/store/pg-store.ts` | `CardRowSchema`, `BoardRowSchema`, `BoardIdRowSchema` → beklenmeyen satırda `500`. |
 | API yanıtı | `web/src/api.ts` | `apiResponseSchema(...)` → `UNEXPECTED_RESPONSE`. |
 | Redis mesajı | `server/src/realtime/redis-relay.ts` | `BoardEventSchema` → kaydedilip atılır. |
@@ -254,7 +277,10 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 - Kart başka sütuna taşınınca o kartta açık düzenleme formu kapanır, yazılan taslak kaybolur (bileşen yeni sütunda baştan kurulur).
 - Redis pub/sub bir olayı en fazla bir kez iletir; Redis kopukken yayınlanan olay kaybolur (abone geri gelince istemciler yeniden eşitlenir).
 - Redis kesintisi sürerken arayüz “Canlı” görünür ama hiçbir olay almaz (kendi sunucusununkiler de Redis üzerinden gelir).
-- `welcome` mesajındaki `clients` yalnız o sunucuda aynı panoya bağlı istemcileri sayar.
+- Üye listesi kişi değil bağlantı sayar: aynı ad iki sekmede iki kez görünür. Adın biçimi denetlense de kimlik doğrulanmaz; herkes istediği adı yazabilir.
+- Çöken sunucunun üyeleri 15 saniyeye kadar listede kalır; liste 5 saniyede bir yeniden sorulduğu için ekrandan en geç yaklaşık 20 saniyede gider.
+- Donan sunucunun (`kill -STOP`) üyeleri 15 saniye sonra listeden düşer, sunucu devam edince tazelemeyle geri gelir.
+- Redis kopukken üye listesi alınamaz (`500`); arayüz son listeyi gösterir, Redis gelince yeniden eşitlemeyle dolar.
 - Redis'te parola yoktur; yalnız `127.0.0.1`'den erişilir.
 - WebSocket bağlantısı için kimlik doğrulama yoktur; adresi bilen her istemci panoyu dinleyebilir.
 - Taşıma ve silme sürerken bütün kart butonları kilitlidir; sonuç sunucudan dönünce ekran güncellenir (iyimser güncelleme yoktur).
@@ -266,3 +292,4 @@ Web paketinde `tsconfig.json` yalnız diğer iki ayar dosyasını `references` i
 - İstemci tarafı kalp atışı: donmuş sunucuyu fark edip yeniden bağlanmak.
 - Kimlik doğrulama: kartı kimin değiştirdiğini çakışmada göstermek.
 - Taşıma için sıra numarası: aynı anda taşınan kartlarda ekranların aynı sırada bitmesi.
+- Üye listesini yoklamadan kurtarmak: süre dolunca sunucu tarafında fark edip `members_changed` yayınlamak.

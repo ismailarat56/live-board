@@ -1,129 +1,133 @@
+**English** · [Türkçe](README.tr.md)
+
 <div align="center">
 
 # Live Board
 
-**Canlı görev panosu: bir ekranda yapılan kart değişikliği, aynı panoyu açan diğer ekranlarda WebSocket ile anında görünür.**
+**Live task board: a card change made on one screen appears at once, over WebSocket, on the other screens that have the same board open.**
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-22.18%2B-5FA04E?logo=nodedotjs&logoColor=white)
-![Lisans](https://img.shields.io/badge/lisans-MIT-2ea44f)
+![License](https://img.shields.io/badge/license-MIT-2ea44f)
 
-[Öne çıkanlar](#öne-çıkanlar) · [Kurulum](#kurulum-ve-çalıştırma) · [API özeti](#api-özeti) · [Mimari](#mimari) · [Testler](#testler)
+[Highlights](#highlights) · [Setup](#setup-and-running) · [API summary](#api-summary) · [Architecture](#architecture) · [Tests](#tests)
 
 </div>
 
-Kartlar sütunlar (yapılacak, yapılıyor, bitti) arasında taşınır; değişiklikler aynı panoya bağlı bütün ekranlara iletilir. Sunucu Node.js ve Express ile, arayüz React ile yazıldı; kartlar PostgreSQL'de saklanır, Redis birden fazla sunucu arasında olayları taşır. Proje TypeScript ile, testleri ilk günden yazılarak geliştiriliyor.
+Cards are moved between columns (to do, in progress, done); changes are delivered to every screen connected to the same board. The server is written with Node.js and Express, the front end with React; cards are stored in PostgreSQL, and Redis carries events between multiple servers. The project is developed in TypeScript, with tests written from the first day.
 
-## Öne çıkanlar
+The user interface is in Turkish. The detailed documents under `docs/` and `notes/` are in Turkish.
 
-- **Canlı güncelleme:** kart oluşturma, taşıma, düzenleme ve silme olayları panoya bağlı soketlere WebSocket ile yayınlanır.
-- **Sürüm kontrolü:** her kartta `version` bulunur; eski sürümle gelen düzenleme ve silme `409 VERSION_CONFLICT` alır.
-- **Çakışmada taslak korunur:** arayüz `409` gelince taslağı silmez, kartın güncel halini gösterir.
-- **İki depo, tek arayüz:** `CardStore` bellekte ve PostgreSQL'de uygulanır; depo `STORE` değişkeniyle seçilir.
-- **Birden fazla sunucu:** `PUBSUB=redis` ile olaylar Redis üzerinden bütün sunuculara dağıtılır.
-- **Panodakiler:** panoya bağlı bağlantılar adlarıyla listelenir; kayıtlar 15 saniye sürelidir, 5 saniyede bir tazelenir.
-- **Otomatik yeniden bağlanma:** bağlantı kopunca arayüz 1 saniyeden 30 saniyeye çıkan beklemeyle yeniden dener ve panoyu baştan çeker.
-- **Ortak şemalar:** kart, olay ve mesaj şemaları `shared` paketinde zod ile bir kez yazılır; tipler `z.infer` ile çıkarılır.
-- **Çalışma anında doğrulama:** istek gövdesi, bağlantı adresi, veritabanı satırı, API yanıtı ve Redis mesajı şemayla doğrulanır.
-- **Sözleşme testleri:** sürüm ve üye deposu sözleşmeleri hem bellekteki depoda hem PostgreSQL ve Redis'te koşar.
-- **Düzgün kapanış:** `SIGTERM` veya `SIGINT` alınca soketler `1001` ile, ardından HTTP sunucusu, havuz ve Redis bağlantıları kapatılır.
+## Highlights
 
-## Gereksinimler
+- **Live updates:** card create, move, edit and delete events are published over WebSocket to the sockets connected to the board.
+- **Version check:** every card has a `version`; an edit or delete that arrives with an old version gets `409 VERSION_CONFLICT`.
+- **The draft is kept on a conflict:** when a `409` arrives, the front end does not discard the draft and shows the current state of the card.
+- **Two stores, one interface:** `CardStore` is implemented in memory and on PostgreSQL; the store is selected with the `STORE` variable.
+- **Multiple servers:** with `PUBSUB=redis`, events are distributed to all servers through Redis.
+- **Who is on the board:** the connections on the board are listed with their names; records expire after 15 seconds and are refreshed every 5 seconds.
+- **Automatic reconnect:** when the connection drops, the front end retries with a wait that grows from 1 second to 30 seconds and fetches the board again from scratch.
+- **Shared schemas:** card, event and message schemas are written once with zod in the `shared` package; types are derived with `z.infer`.
+- **Runtime validation:** the request body, the connection URL, the database row, the API response and the Redis message are validated against a schema.
+- **Contract tests:** the version and member store contracts run against both the in-memory store and PostgreSQL and Redis.
+- **Graceful shutdown:** on `SIGTERM` or `SIGINT`, the sockets are closed with `1001`, then the HTTP server, the pool and the Redis connections are closed.
 
-- Node.js 22.18 veya üstü. Node, `.ts` dosyalarını tiplerini silerek doğrudan çalıştırır.
-- npm (workspaces). `npm install` yalnız kökte çalıştırılır.
-- Kalıcı depo ve birden fazla sunucu için Docker: `compose.yaml` PostgreSQL 18 (`127.0.0.1:5433`) ve Redis 8.8 (`127.0.0.1:6380`) başlatır.
+## Requirements
 
-## Kurulum ve çalıştırma
+- Node.js 22.18 or later. Node runs `.ts` files directly by stripping their types.
+- npm (workspaces). `npm install` is run only in the root.
+- Docker, for the persistent store and for multiple servers: `compose.yaml` starts PostgreSQL 18 (`127.0.0.1:5433`) and Redis 8.8 (`127.0.0.1:6380`).
 
-Komutlar kök klasörde çalıştırılır.
+## Setup and running
 
-**Veritabanı olmadan.** `server/.env` yoksa sunucu bellek deposunu ve `4000` portunu kullanır; kartlar sunucu kapanınca kaybolur.
+Commands are run in the root folder.
+
+**Without a database.** If `server/.env` does not exist, the server uses the in-memory store and port `4000`; cards are lost when the server stops.
 
 ```bash
 npm install
 npm run dev:server
-npm run dev:web # Başka bir terminalde; http://localhost:5173
+npm run dev:web # In another terminal; http://localhost:5173
 ```
 
-**PostgreSQL ve Redis ile.** Önce ortam dosyalarını oluştur:
+**With PostgreSQL and Redis.** First create the environment files:
 
 ```bash
 cp .env.db.example .env.db
 cp server/.env.example server/.env
 ```
 
-`.env.db` içinde `POSTGRES_PASSWORD` değerini doldur (`openssl rand -hex 16`). `server/.env` içindeki `DATABASE_URL` değerinde `PAROLA` yerine aynı parolayı yaz. `.env` dosyaları git'e girmez. Sonra:
+Fill in the `POSTGRES_PASSWORD` value in `.env.db` (`openssl rand -hex 16`). In the `DATABASE_URL` value in `server/.env`, replace `PAROLA` ("password") with the same password. `.env` files are not tracked by git. Then:
 
 ```bash
 docker compose up -d
 npm run db:migrate -w @live-board/server
 npm run dev:server
-npm run dev:web # Başka bir terminalde; http://localhost:5173
+npm run dev:web # In another terminal; http://localhost:5173
 ```
 
-Vite, `/api`, `/health` ve `/ws` isteklerini `localhost:4000` üzerindeki sunucuya iletir; `API_PORT` ile hedef port değiştirilebilir.
+Vite forwards `/api`, `/health` and `/ws` requests to the server on `localhost:4000`; the target port can be changed with `API_PORT`.
 
-İki sunucu ve iki arayüzle çalıştırma, bütün komutlar ve veritabanı ayrıntıları: [docs/KURULUM.md](docs/KURULUM.md)
+Running with two servers and two front ends, all commands and database details: [docs/KURULUM.md](docs/KURULUM.md)
 
-## API özeti
+## API summary
 
-| Yöntem | Yol | Açıklama |
+| Method | Path | Description |
 | --- | --- | --- |
-| GET | `/health` | Sunucunun sağlık durumu. |
-| GET | `/api/boards/:boardId/cards` | Panodaki kartlar, sütun ve pozisyon sırasıyla. |
-| GET | `/api/boards/:boardId/members` | Panodaki bağlantılar, ada göre sıralı. |
-| POST | `/api/boards/:boardId/cards` | Kart oluşturur; `201` döner. |
-| PATCH | `/api/cards/:cardId/move` | Kartı taşır; panonun bütün kartlarını döner. |
-| PATCH | `/api/cards/:cardId` | Kartı düzenler; `expectedVersion` gerekir. |
-| DELETE | `/api/cards/:cardId?expectedVersion=N` | Kartı siler; gövdesiz `204` döner. |
+| GET | `/health` | Health status of the server. |
+| GET | `/api/boards/:boardId/cards` | Cards on the board, ordered by column and position. |
+| GET | `/api/boards/:boardId/members` | Connections on the board, sorted by name. |
+| POST | `/api/boards/:boardId/cards` | Creates a card; returns `201`. |
+| PATCH | `/api/cards/:cardId/move` | Moves the card; returns all cards of the board. |
+| PATCH | `/api/cards/:cardId` | Edits the card; requires `expectedVersion`. |
+| DELETE | `/api/cards/:cardId?expectedVersion=N` | Deletes the card; returns `204` with no body. |
 
-JSON yanıtları `{ success: true, data }` veya `{ success: false, error: { code, message } }` biçimindedir.
+JSON responses have the form `{ success: true, data }` or `{ success: false, error: { code, message } }`.
 
-WebSocket bağlantı adresi: `ws://localhost:4000/ws?boardId=1&name=Ali`. Sunucu `welcome`, `event`, `pong` ve `error` mesajları gönderir; istemci `ping` gönderir.
+WebSocket connection URL: `ws://localhost:4000/ws?boardId=1&name=Ali`. The server sends `welcome`, `event`, `pong` and `error` messages; the client sends `ping`.
 
-İstek gövdeleri, mesaj biçimleri ve sürüm çakışması kuralları: [docs/API.md](docs/API.md)
+Request bodies, message formats and version conflict rules: [docs/API.md](docs/API.md)
 
-## Mimari
+## Architecture
 
-Olay yalnız kayıt başarılı olduktan sonra yayınlanır; reddedilen istek olay üretmez.
+An event is published only after the write has succeeded; a rejected request produces no event.
 
 ```text
-PUBSUB=local: HTTP isteği --> store (kalıcı yazma) --> hub.publish(boardId, event) --> o sunucuda o panoya bağlı soketler
+PUBSUB=local: HTTP request --> store (persistent write) --> hub.publish(boardId, event) --> sockets connected to that board on that server
 
-PUBSUB=redis: HTTP isteği --> store (kalıcı yazma) --> relay.publish --> Redis: PUBLISH board:<id> <olay JSON>
-              Redis --> her sunucunun abone bağlantısı (PSUBSCRIBE board:*) --> JSON + BoardEventSchema --> hub.publish --> o sunucunun soketleri
+PUBSUB=redis: HTTP request --> store (persistent write) --> relay.publish --> Redis: PUBLISH board:<id> <event JSON>
+              Redis --> subscriber connection of every server (PSUBSCRIBE board:*) --> JSON + BoardEventSchema --> hub.publish --> sockets of that server
 ```
 
-- `STORE=memory` geçici bellek deposunu, `STORE=postgres` kalıcı PostgreSQL deposunu seçer.
-- PostgreSQL deposu parametreli sorgular kullanır; taşıma ve silme bir transaction içinde, satırlar `FOR UPDATE` ile kilitlenerek yapılır.
-- `PUBSUB=redis` ile sunucu kendi olayını da Redis'ten geri alarak dağıtır; bütün sekmeler olayları aynı sırayla görür.
-- Redis olayları taşır ve süreli üye kayıtlarını tutar; kartlar PostgreSQL'de kalır.
+- `STORE=memory` selects the temporary in-memory store, `STORE=postgres` the persistent PostgreSQL store.
+- The PostgreSQL store uses parameterized queries; move and delete run inside a transaction, with the rows locked by `FOR UPDATE`.
+- With `PUBSUB=redis`, the server also receives its own event back from Redis and distributes it; all tabs see the events in the same order.
+- Redis carries the events and holds the expiring member records; the cards stay in PostgreSQL.
 
-Depolar, Redis köprüsü, üye listesi, doğrulama noktaları ve TypeScript ayarları: [docs/MIMARI.md](docs/MIMARI.md)
+Stores, the Redis relay, the member list, validation points and TypeScript settings: [docs/MIMARI.md](docs/MIMARI.md)
 
-## Klasör yapısı
+## Folder structure
 
 ```text
-package.json         shared, server ve web paketlerini birleştiren npm workspaces tanımı
-compose.yaml         PostgreSQL 18 ve Redis 8.8 (Docker)
-shared/src/          zod şemaları ve tipleri; moveCard, removeCard, applyBoardEvent
+package.json         npm workspaces definition that joins the shared, server and web packages
+compose.yaml         PostgreSQL 18 and Redis 8.8 (Docker)
+shared/src/          zod schemas and types; moveCard, removeCard, applyBoardEvent
 server/
-  src/domain/        pano tanımı, taşıma ve olay testleri
-  src/http/          hata sınıfı ve gelen verinin zod ile doğrulanması
-  src/realtime/      hub, WebSocket sunucusu, Redis bağlantıları ve köprüsü, üye depoları
-  src/store/         CardStore arayüzü, bellek ve PostgreSQL depoları, diffCards
-  src/db/            bağlantı havuzu, bağlantı kontrolü, migration çalıştırıcısı
-  migrations/        sıra numaralı SQL dosyaları
-  playground/        TypeScript, bağlantı havuzu, zod ve WebSocket alıştırmaları
-web/src/             React arayüzü (Vite); saf fonksiyonların testleri *.test.ts dosyalarında
-notes/               geliştirme günlükleri ve uygulama rehberi
-docs/                kurulum, API, mimari ve bilinen eksikler
+  src/domain/        board definition, move and event tests
+  src/http/          error class and zod validation of incoming data
+  src/realtime/      hub, WebSocket server, Redis connections and relay, member stores
+  src/store/         CardStore interface, in-memory and PostgreSQL stores, diffCards
+  src/db/            connection pool, connection check, migration runner
+  migrations/        sequentially numbered SQL files
+  playground/        TypeScript, connection pool, zod and WebSocket exercises
+web/src/             React front end (Vite); tests of the pure functions are in *.test.ts files
+notes/               development logs and implementation guide
+docs/                setup, API, architecture and known limitations
 ```
 
-## Testler
+## Tests
 
-Kök klasörde:
+In the root folder:
 
 ```bash
 npm run typecheck
@@ -132,22 +136,22 @@ npm run test:db -w @live-board/server
 npm run test:redis -w @live-board/server
 ```
 
-- `npm test`: sunucunun iş kuralı, HTTP ve WebSocket testleri ile web tarafındaki saf fonksiyon testleri. Veritabanı gerektirmez.
-- `npm run test:db`: PostgreSQL deposunu test eder. PostgreSQL açık, `server/.env` ayarlı ve migration uygulanmış olmalıdır.
-- `npm run test:redis`: üye deposunun sözleşmesini gerçek Redis'te çalıştırır. Redis'in 1 numaralı veritabanını kullanır.
+- `npm test`: the server's business rule, HTTP and WebSocket tests, plus the pure function tests on the web side. Does not need a database.
+- `npm run test:db`: tests the PostgreSQL store. PostgreSQL must be running, `server/.env` must be configured and the migrations must be applied.
+- `npm run test:redis`: runs the member store contract against a real Redis. It uses Redis database number 1.
 
-Testler Node'un kendi test çalıştırıcısıyla (`node --test`) koşar. Ayrıntı: [docs/KURULUM.md](docs/KURULUM.md#testler)
+The tests run with Node's own test runner (`node --test`). Details: [docs/KURULUM.md](docs/KURULUM.md#testler)
 
-## Bilinen eksikler
+## Known limitations
 
-- Kimlik doğrulama yoktur; adresi bilen her istemci panoyu dinleyebilir ve istediği adı yazabilir.
-- Tek pano vardır (id `1`).
-- Olayların sıra numarası yoktur; iki kişi aynı anda kart taşırsa iki ekrandaki sıralama farklı bitebilir.
-- Redis kopukken yayınlanan olay kaybolur; abone geri gelince istemciler yeniden eşitlenir.
-- Arayüzde yalnız saf fonksiyonların testi vardır; bileşenler tarayıcıda elle denenir.
+- There is no authentication; any client that knows the URL can listen to the board and enter any name it wants.
+- There is a single board (id `1`).
+- Events have no sequence number; if two people move cards at the same time, the order can end up different on the two screens.
+- An event published while Redis is disconnected is lost; the clients resynchronize when the subscriber comes back.
+- The front end only has tests for the pure functions; the components are tried by hand in the browser.
 
-Tam liste ve sonraki adımlar: [docs/BILINEN_EKSIKLER.md](docs/BILINEN_EKSIKLER.md)
+Full list and next steps: [docs/BILINEN_EKSIKLER.md](docs/BILINEN_EKSIKLER.md)
 
-## Lisans
+## License
 
-Kod [MIT lisansı](LICENSE) ile sunulur.
+The code is released under the [MIT license](LICENSE).
